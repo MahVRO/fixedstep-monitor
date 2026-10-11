@@ -117,14 +117,34 @@ if ($EnableGitPublish) {
 
 Write-MonitorLog 'INFO' "quote_monitor_started collection_interval=$IntervalSeconds publish_enabled=$($EnableGitPublish.IsPresent)"
 $priorGitTimeout = $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS
+$priorErrorActionPreference = $ErrorActionPreference
 $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS = [string]$GitTimeoutSeconds
 try {
+    # Windows PowerShell converts native stderr into ErrorRecord objects. With
+    # Stop semantics, one harmless MT5 diagnostic would terminate the wrapper
+    # before Python can apply its own fail-safe collection handling.
+    $ErrorActionPreference = 'Continue'
     & $resolvedPython @arguments 2>&1 | ForEach-Object {
         Write-RuntimeJson $_
     }
-    $exitCode = $LASTEXITCODE
+    if ($null -eq $LASTEXITCODE) {
+        # A native invocation failure in Windows PowerShell 5.1 is not always
+        # terminating under Continue semantics. Preserve Task Scheduler retry.
+        Write-MonitorLog 'WARN' 'runner_pipeline_failed category=NativeInvocationFailed'
+        $exitCode = 1
+    }
+    else {
+        $exitCode = $LASTEXITCODE
+    }
+}
+catch {
+    # Never persist the exception text: startup failures can include private
+    # paths or endpoints. Task Scheduler can safely retry a non-zero exit.
+    Write-MonitorLog 'WARN' "runner_pipeline_failed category=$($_.Exception.GetType().Name)"
+    $exitCode = 1
 }
 finally {
+    $ErrorActionPreference = $priorErrorActionPreference
     $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS = $priorGitTimeout
 }
 Write-MonitorLog 'INFO' "quote_monitor_exited code=$exitCode"
