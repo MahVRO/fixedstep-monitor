@@ -33,14 +33,17 @@
 
   <main id="content" class="page">
     <section class="toolbar" aria-label="Chart controls">
-      <div class="range-group" role="group" aria-label="Market-time range">
+      <div class="range-group" role="group" aria-label="Collector-time range">
         <button type="button" class="is-active" data-range-ms="300000" aria-pressed="true">5 min</button>
         <button type="button" data-range-ms="900000" aria-pressed="false">15 min</button>
         <button type="button" data-range-ms="3600000" aria-pressed="false">1 hour</button>
         <button type="button" data-range-ms="21600000" aria-pressed="false">6 hours</button>
         <button type="button" data-range-ms="86400000" aria-pressed="false">24 hours</button>
+        <button type="button" data-range-ms="604800000" aria-pressed="false">7 days</button>
+        <button type="button" data-range-ms="2592000000" aria-pressed="false">30 days</button>
+        <button type="button" data-range-ms="7776000000" aria-pressed="false">90 days</button>
       </div>
-      <p id="range-note" class="range-note">Range follows broker tick time.</p>
+      <p id="range-note" class="range-note">Range follows collector first-observation time.</p>
       <a class="ai-link" href="../ai/">AI-readable view <span aria-hidden="true">↗</span></a>
     </section>
 
@@ -71,12 +74,12 @@
       <article>
         <span>Collector</span>
         <strong id="collector-state">Checking</strong>
-        <small id="collector-age">No collection time</small>
+        <small id="collector-age">Backend collection age unavailable</small>
       </article>
       <article>
-        <span>Broker tick</span>
+        <span>MT5 timestamp</span>
         <strong id="tick-state">Unavailable</strong>
-        <small id="tick-age">No broker tick time</small>
+        <small id="tick-age">No MT5-reported timestamp</small>
       </article>
       <article>
         <span>Transport</span>
@@ -86,14 +89,14 @@
       <article>
         <span>Visible observations</span>
         <strong id="visible-samples">0</strong>
-        <small id="coverage-note">No market-time coverage</small>
+        <small id="coverage-note">No collector-time coverage</small>
       </article>
     </section>
 
     <section class="panel price-panel" aria-labelledby="price-chart-title">
       <div class="panel-heading">
         <div>
-          <p class="eyebrow">Broker tick time · UTC</p>
+          <p class="eyebrow">Collector first-observation host clock</p>
           <h2 id="price-chart-title">Bid, ask and mid price</h2>
         </div>
         <div class="chart-meta">
@@ -107,7 +110,7 @@
         </div>
       </div>
       <div class="chart-wrap price-chart-wrap">
-        <canvas id="quote-chart" role="img" aria-label="FixedStep0.5 bid, ask and mid price over broker tick time" aria-describedby="quote-chart-summary"></canvas>
+        <canvas id="quote-chart" role="img" aria-label="FixedStep0.5 bid, ask and mid price over collector first-observation time" aria-describedby="quote-chart-summary"></canvas>
         <p class="empty-chart">No verified FixedStep0.5 tick history is available.</p>
         <p id="quote-chart-summary" class="sr-only">No verified FixedStep0.5 tick history is available.</p>
       </div>
@@ -115,7 +118,7 @@
         <div><span>Mid low</span><strong id="range-low">Unavailable</strong></div>
         <div><span>Mid high</span><strong id="range-high">Unavailable</strong></div>
         <div><span>Mid change</span><strong id="range-change">Unavailable</strong><small id="range-change-pct"></small></div>
-        <div><span>Market-time span</span><strong id="range-span">Unavailable</strong></div>
+        <div><span>Observation span</span><strong id="range-span">Unavailable</strong></div>
       </div>
     </section>
 
@@ -128,7 +131,7 @@
         <span id="spread-unit" class="unit-label">Price units</span>
       </div>
       <div class="chart-wrap spread-chart-wrap">
-        <canvas id="spread-chart" role="img" aria-label="FixedStep0.5 spread over broker tick time" aria-describedby="spread-chart-summary"></canvas>
+        <canvas id="spread-chart" role="img" aria-label="FixedStep0.5 spread over collector first-observation time" aria-describedby="spread-chart-summary"></canvas>
         <p class="empty-chart">No verified spread history is available.</p>
         <p id="spread-chart-summary" class="sr-only">No verified spread history is available.</p>
       </div>
@@ -141,7 +144,7 @@
 
     <section class="source-note" aria-label="Data interpretation">
       <strong>Two independent clocks</strong>
-      <span>The collector time proves the monitor is running. Broker tick time drives the chart and may remain unchanged when the market is inactive; an old tick alone does not mean the collector is disconnected.</span>
+      <span>Collector first-observation host time drives ranges and charts. It is serialized with a UTC offset, but host synchronization and absolute accuracy are not asserted. The raw MT5 timestamp is preserved exactly as reported; its time basis is unverified, and clock offsets are shown and never corrected or used to claim freshness.</span>
     </section>
 
     <footer class="page-footer">

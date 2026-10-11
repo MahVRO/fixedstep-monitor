@@ -88,6 +88,8 @@ CREATE INDEX IF NOT EXISTS idx_trades_exit ON closed_trades(exit_time);
 CREATE INDEX IF NOT EXISTS idx_strategy_observed ON strategy_samples(observed_at);
 CREATE INDEX IF NOT EXISTS idx_events_observed ON strategy_events(observed_at);
 CREATE INDEX IF NOT EXISTS idx_quotes_tick_at ON quote_samples(symbol, tick_at);
+CREATE INDEX IF NOT EXISTS idx_quotes_first_collected_at
+    ON quote_samples(symbol, first_collected_at);
 """
 
 
@@ -447,7 +449,7 @@ class MonitorStore:
             SELECT tick_at, first_collected_at, last_collected_at, data_json
             FROM quote_samples
             WHERE symbol = ?
-            ORDER BY tick_time_msc
+            ORDER BY first_collected_at, tick_time_msc
             """,
             (symbol,),
         ).fetchall()
@@ -455,7 +457,10 @@ class MonitorStore:
         for row in rows:
             item = _loads(row["data_json"])
             item["tick_at"] = row["tick_at"]
-            item["collected_at"] = row["last_collected_at"]
+            # Public chart time is when this distinct broker tick was first
+            # observed by the collector. Re-polling an unchanged closed-market
+            # tick must not move the historical point forward in time.
+            item["collected_at"] = row["first_collected_at"]
             output.append(item)
         return output
 
@@ -469,39 +474,56 @@ class MonitorStore:
     ) -> list[dict[str, Any]]:
         """Return only public-resolution rows from the bounded 90-day window.
 
-        SQL selects every tick from the newest 24 hours, the last observed tick
-        in each UTC minute for days 2-7, and the last observed tick in each UTC
-        hour for days 8-90.  Python therefore decodes only publishable rows,
-        rather than hundreds of thousands of full-cadence local observations.
+        SQL selects by collector first-observation time: every distinct tick
+        from the newest 24 hours, the last collected tick in each collector
+        host-clock minute for days 2-7, and the last collected tick in each
+        collector host-clock hour for days 8-90. The serialized offset does
+        not assert host synchronization. The raw MT5-reported clock is
+        retained but never defines public retention or time buckets.
         """
 
         rows = self.connection.execute(
             """
-            WITH selected_ticks(tick_time_msc) AS (
+            WITH full_ticks(tick_time_msc) AS (
                 SELECT tick_time_msc
                 FROM quote_samples
-                WHERE symbol = ? AND tick_at >= ?
-
-                UNION
-
-                SELECT MAX(tick_time_msc)
+                WHERE symbol = ? AND first_collected_at >= ?
+            ),
+            minute_ranked(tick_time_msc, bucket_rank) AS (
+                SELECT tick_time_msc,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY substr(first_collected_at, 1, 16)
+                           ORDER BY first_collected_at DESC, tick_time_msc DESC
+                       )
                 FROM quote_samples
-                WHERE symbol = ? AND tick_at >= ? AND tick_at < ?
-                GROUP BY substr(tick_at, 1, 16)
-
-                UNION
-
-                SELECT MAX(tick_time_msc)
+                WHERE symbol = ?
+                  AND first_collected_at >= ?
+                  AND first_collected_at < ?
+            ),
+            hour_ranked(tick_time_msc, bucket_rank) AS (
+                SELECT tick_time_msc,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY substr(first_collected_at, 1, 13)
+                           ORDER BY first_collected_at DESC, tick_time_msc DESC
+                       )
                 FROM quote_samples
-                WHERE symbol = ? AND tick_at >= ? AND tick_at < ?
-                GROUP BY substr(tick_at, 1, 13)
+                WHERE symbol = ?
+                  AND first_collected_at >= ?
+                  AND first_collected_at < ?
+            ),
+            selected_ticks(tick_time_msc) AS (
+                SELECT tick_time_msc FROM full_ticks
+                UNION
+                SELECT tick_time_msc FROM minute_ranked WHERE bucket_rank = 1
+                UNION
+                SELECT tick_time_msc FROM hour_ranked WHERE bucket_rank = 1
             )
             SELECT q.tick_at, q.first_collected_at, q.last_collected_at, q.data_json
             FROM quote_samples AS q
             JOIN selected_ticks AS selected
               ON selected.tick_time_msc = q.tick_time_msc
             WHERE q.symbol = ?
-            ORDER BY q.tick_time_msc
+            ORDER BY q.first_collected_at, q.tick_time_msc
             """,
             (
                 symbol,
@@ -519,7 +541,7 @@ class MonitorStore:
         for row in rows:
             item = _loads(row["data_json"])
             item["tick_at"] = row["tick_at"]
-            item["collected_at"] = row["last_collected_at"]
+            item["collected_at"] = row["first_collected_at"]
             output.append(item)
         return output
 
@@ -535,10 +557,10 @@ class MonitorStore:
     def latest_quote(self, symbol: str = "FixedStep0.5") -> dict[str, Any] | None:
         row = self.connection.execute(
             """
-            SELECT tick_at, last_collected_at, data_json
+            SELECT tick_at, first_collected_at, last_collected_at, data_json
             FROM quote_samples
             WHERE symbol = ?
-            ORDER BY tick_time_msc DESC LIMIT 1
+            ORDER BY last_collected_at DESC, tick_time_msc DESC LIMIT 1
             """,
             (symbol,),
         ).fetchone()
@@ -546,7 +568,7 @@ class MonitorStore:
             return None
         item = _loads(row["data_json"])
         item["tick_at"] = row["tick_at"]
-        item["collected_at"] = row["last_collected_at"]
+        item["collected_at"] = row["first_collected_at"]
         return item
 
     def counts(self) -> dict[str, int]:

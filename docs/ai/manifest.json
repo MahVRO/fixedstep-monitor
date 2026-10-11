@@ -1,8 +1,17 @@
 {
   "schema_version": "fixedstep-quotes-v1",
-  "snapshot_id": "6f97e63c-3e26-441f-b35e-effe43f75e75",
-  "generated_at": "2026-10-11T10:52:41.195Z",
+  "snapshot_id": "5e881205-8eea-459e-a5b5-4b5bc6ba04e7",
+  "generated_at": "2026-10-11T11:14:14.158Z",
   "timezone": "UTC",
+  "collector_clock_basis": "utc_serialized_host_clock_synchronization_not_asserted",
+  "timezone_applies_to": [
+    "generated_at",
+    "collection.collected_at",
+    "quote.collected_at",
+    "samples[].collected_at"
+  ],
+  "tick_time_basis": "mt5_reported_unverified",
+  "chart_time_basis": "collector_first_observation_host_clock",
   "symbol": "FixedStep0.5",
   "collection": {
     "status": "no_data",
@@ -16,9 +25,10 @@
     "stored_quote_samples": 0,
     "maximum_public_samples": 18000,
     "maximum_public_json_bytes": 3500000,
-    "sampling_policy": "15-second source samples for the latest 24 hours; last observed sample per UTC minute through day 7; last observed sample per UTC hour through day 90; older samples are not published; no interpolation",
-    "history_generated_at": "2026-10-11T10:52:41.195Z",
-    "history_snapshot_id": "6f97e63c-3e26-441f-b35e-effe43f75e75"
+    "sampling_policy": "15-second source samples for the latest 24 hours; last observed sample per collector first-observation host-clock minute through day 7; last observed sample per collector first-observation host-clock hour through day 90; older samples are not published; raw MT5 time does not control retention; no interpolation",
+    "chart_time_basis": "collector_first_observation_host_clock",
+    "history_generated_at": "2026-10-11T11:14:14.158Z",
+    "history_snapshot_id": "5e881205-8eea-459e-a5b5-4b5bc6ba04e7"
   },
   "page": "https://mahvro.github.io/fixedstep-monitor/ai/",
   "datasets": [
@@ -28,7 +38,9 @@
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/latest.json",
       "row_count": 1,
       "available_fields": [
+        "chart_time_basis",
         "collection",
+        "collector_clock_basis",
         "coverage",
         "generated_at",
         "links",
@@ -37,10 +49,12 @@
         "schema_version",
         "snapshot_id",
         "symbol",
-        "timezone"
+        "tick_time_basis",
+        "timezone",
+        "timezone_applies_to"
       ],
-      "size_bytes": 1444,
-      "sha256": "f3a751efbe64adb7a67165fa2e25ebc0c71771dfa8fa9c7b855e98472b8416bb"
+      "size_bytes": 1911,
+      "sha256": "57e1d4d932b71094f643d1981e5e3192fd6f37ee89a47a7b5932c5630c8d84bb"
     },
     {
       "title": "Quote history",
@@ -57,8 +71,8 @@
         "spread",
         "spread_points"
       ],
-      "size_bytes": 1444,
-      "sha256": "f3a751efbe64adb7a67165fa2e25ebc0c71771dfa8fa9c7b855e98472b8416bb"
+      "size_bytes": 1911,
+      "sha256": "57e1d4d932b71094f643d1981e5e3192fd6f37ee89a47a7b5932c5630c8d84bb"
     },
     {
       "title": "Quote history",

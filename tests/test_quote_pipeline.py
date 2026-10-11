@@ -6,12 +6,14 @@ import inspect
 import json
 import tempfile
 import textwrap
+import threading
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 import fixedstep_monitor.cli as cli_module
+import fixedstep_monitor.quote_exporter as quote_exporter_module
 from fixedstep_monitor.cli import _advance_periodic_deadline, build_parser
 from fixedstep_monitor.quote_collector import QuoteCollector, QuoteCollectorConfig
 from fixedstep_monitor.quote_exporter import (
@@ -80,8 +82,12 @@ class QuoteStorageTests(unittest.TestCase):
                 self.assertEqual(store.counts()["quote_samples"], 1)
                 self.assertEqual(
                     store.latest_quote()["collected_at"],
-                    "2026-10-11T10:00:15.000Z",
+                    "2026-10-11T10:00:00.000Z",
                 )
+                row = store.connection.execute(
+                    "SELECT last_collected_at FROM quote_samples"
+                ).fetchone()
+                self.assertEqual(row["last_collected_at"], "2026-10-11T10:00:15.000Z")
                 self.assertEqual(store.last_successful_quote_run()["run_id"], "second")
             with MonitorStore(path) as reopened:
                 self.assertEqual(len(reopened.quote_samples()), 1)
@@ -104,8 +110,10 @@ class QuoteStorageTests(unittest.TestCase):
                         run,
                         snapshot(
                             stamp,
-                            stamp,
-                            int(observed.timestamp() * 1000),
+                            (observed + timedelta(hours=3)).isoformat(
+                                timespec="milliseconds"
+                            ).replace("+00:00", "Z"),
+                            int((observed + timedelta(hours=3)).timestamp() * 1000),
                             bid=bid,
                             ask=bid + 0.5,
                         ),
@@ -131,13 +139,13 @@ class QuoteStorageTests(unittest.TestCase):
                     EXPLAIN QUERY PLAN
                     SELECT tick_at, first_collected_at, last_collected_at, data_json
                     FROM quote_samples
-                    WHERE symbol = ? AND tick_at >= ?
-                    ORDER BY tick_at, tick_time_msc
+                    WHERE symbol = ? AND first_collected_at >= ?
+                    ORDER BY first_collected_at, tick_time_msc
                     """,
                     ("FixedStep0.5", cutoff),
                 ).fetchall()
                 self.assertIn(
-                    "idx_quotes_tick_at",
+                    "idx_quotes_first_collected_at",
                     " ".join(str(column) for row in query_plan for column in row),
                 )
 
@@ -162,8 +170,10 @@ class QuoteStorageTests(unittest.TestCase):
                         run,
                         snapshot(
                             stamp,
-                            stamp,
-                            int(observed.timestamp() * 1000),
+                            (observed + timedelta(hours=3)).isoformat(
+                                timespec="milliseconds"
+                            ).replace("+00:00", "Z"),
+                            int((observed + timedelta(hours=3)).timestamp() * 1000),
                             bid=bid,
                             ask=bid + 0.5,
                         ),
@@ -209,7 +219,7 @@ class QuoteExporterTests(unittest.TestCase):
             run,
             snapshot(
                 "2026-10-11T11:59:55.000Z",
-                "2026-10-11T11:59:54.368Z",
+                "2026-10-11T14:59:54.368Z",
                 1_791_725_594_368,
                 last=0.0,
             ),
@@ -230,8 +240,22 @@ class QuoteExporterTests(unittest.TestCase):
             self.assertEqual(payload["schema_version"], QUOTE_SCHEMA_VERSION)
             self.assertEqual(payload["symbol"], "FixedStep0.5")
             self.assertEqual(payload["collection"]["status"], "live")
+            self.assertEqual(payload["tick_time_basis"], "mt5_reported_unverified")
+            self.assertEqual(
+                payload["chart_time_basis"],
+                "collector_first_observation_host_clock",
+            )
+            self.assertEqual(
+                payload["collector_clock_basis"],
+                "utc_serialized_host_clock_synchronization_not_asserted",
+            )
             self.assertIsNone(payload["quote"]["last"])
             self.assertAlmostEqual(payload["quote"]["mid"], 5973.55)
+            self.assertEqual(payload["quote"]["tick_at"], "2026-10-11T14:59:54.368Z")
+            self.assertTrue(payload["quote"]["mt5_reported_offset_material"])
+            self.assertAlmostEqual(
+                payload["quote"]["mt5_reported_offset_seconds"], 10799.368
+            )
             self.assertEqual(payload["samples"], [])
             self.assertFalse(legacy.exists())
 
@@ -241,6 +265,14 @@ class QuoteExporterTests(unittest.TestCase):
             self.assertEqual(latest["snapshot_id"], quotes["snapshot_id"])
             self.assertEqual(latest["samples"], [])
             self.assertEqual(len(quotes["samples"]), 1)
+            self.assertEqual(
+                quotes["samples"][0]["collected_at"],
+                "2026-10-11T11:59:55.000Z",
+            )
+            self.assertEqual(
+                quotes["coverage"]["collection_start_at"],
+                "2026-10-11T11:59:55.000Z",
+            )
             self.assertLess((data / "latest.json").stat().st_size, 10_000)
             self.assertLessEqual(
                 (data / "quotes.json").stat().st_size, MAX_PUBLIC_JSON_BYTES
@@ -257,10 +289,17 @@ class QuoteExporterTests(unittest.TestCase):
             self.assertTrue(
                 (root / "docs" / "ai" / "charts" / "fixedstep-price.svg").exists()
             )
+            price_svg = (
+                root / "docs" / "ai" / "charts" / "fixedstep-price.svg"
+            ).read_text(encoding="utf-8")
+            self.assertIn("2026-10-11T11:59:55", price_svg)
+            self.assertNotIn("2026-10-11T14:59:54", price_svg)
             ai_html = (root / "docs" / "ai" / "index.html").read_text(
                 encoding="utf-8"
             )
             self.assertNotIn("<script", ai_html.lower())
+            self.assertIn("time basis unverified", ai_html)
+            self.assertIn("never used for freshness", ai_html)
             for forbidden_key in (
                 '"balance"',
                 '"equity"',
@@ -353,6 +392,131 @@ class QuoteExporterTests(unittest.TestCase):
                 for path in static_paths:
                     self.assertEqual(path.read_bytes(), before[path], path.name)
 
+    def test_runtime_latest_never_regresses_or_waits_for_static_worker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "quotes.sqlite3"
+            runtime_latest = root / "runtime" / "quote-api" / "latest.json"
+            render_started = threading.Event()
+            release_render = threading.Event()
+            stage_started = threading.Event()
+            release_stage = threading.Event()
+            fast_done = threading.Event()
+            blocked_once = threading.Event()
+            background_errors: list[BaseException] = []
+            fast_errors: list[BaseException] = []
+
+            with MonitorStore(database) as main_store:
+                self._populated(main_store)
+                live_exporter = QuoteStaticExporter(
+                    main_store,
+                    root / "docs",
+                    clock=lambda: NOW,
+                    live_latest_path=runtime_latest,
+                )
+                live_exporter.export()
+                live_exporter.export_latest()
+                original_line_svg = quote_exporter_module._line_svg
+
+                def blocking_line_svg(*args, **kwargs):
+                    if not blocked_once.is_set():
+                        blocked_once.set()
+                        render_started.set()
+                        if not release_render.wait(5):
+                            raise TimeoutError("test renderer was not released")
+                    return original_line_svg(*args, **kwargs)
+
+                def blocked_stage() -> None:
+                    stage_started.set()
+                    if not release_stage.wait(5):
+                        raise TimeoutError("test stage was not released")
+
+                def static_job() -> None:
+                    try:
+                        with MonitorStore(database) as static_store:
+                            QuoteStaticExporter(
+                                static_store,
+                                root / "docs",
+                                clock=lambda: NOW,
+                            ).export(after_write=blocked_stage)
+                    except BaseException as exc:
+                        background_errors.append(exc)
+
+                def fast_job() -> None:
+                    try:
+                        with MonitorStore(database) as fast_store:
+                            QuoteStaticExporter(
+                                fast_store,
+                                root / "docs",
+                                clock=lambda: NOW,
+                                live_latest_path=runtime_latest,
+                            ).export_latest()
+                    except BaseException as exc:
+                        fast_errors.append(exc)
+                    finally:
+                        fast_done.set()
+
+                with patch(
+                    "fixedstep_monitor.quote_exporter._line_svg",
+                    side_effect=blocking_line_svg,
+                ):
+                    background = threading.Thread(target=static_job)
+                    background.start()
+                    try:
+                        self.assertTrue(render_started.wait(2))
+                        second = main_store.begin_run(
+                            "2026-10-11T12:00:00.000Z", "runtime-200"
+                        )
+                        main_store.record_quote_success(
+                            second,
+                            snapshot(
+                                "2026-10-11T12:00:00.000Z",
+                                "2026-10-11T11:59:59.000Z",
+                                1_791_725_599_000,
+                                bid=200.0,
+                                ask=200.5,
+                            ),
+                        )
+                        live_exporter.export_latest()
+                        current = json.loads(runtime_latest.read_text(encoding="utf-8"))
+                        self.assertEqual(current["quote"]["bid"], 200.0)
+
+                        release_render.set()
+                        self.assertTrue(stage_started.wait(2))
+                        third = main_store.begin_run(
+                            "2026-10-11T12:00:15.000Z", "runtime-300"
+                        )
+                        main_store.record_quote_success(
+                            third,
+                            snapshot(
+                                "2026-10-11T12:00:15.000Z",
+                                "2026-10-11T12:00:14.000Z",
+                                1_791_725_614_000,
+                                bid=300.0,
+                                ask=300.5,
+                            ),
+                        )
+                        fast = threading.Thread(target=fast_job)
+                        fast.start()
+                        self.assertTrue(
+                            fast_done.wait(1),
+                            "runtime latest waited for blocked static Git staging",
+                        )
+                        fast.join(1)
+                        self.assertFalse(fast.is_alive())
+                        self.assertEqual(fast_errors, [])
+                        current = json.loads(runtime_latest.read_text(encoding="utf-8"))
+                        self.assertEqual(current["quote"]["bid"], 300.0)
+                    finally:
+                        release_render.set()
+                        release_stage.set()
+                        background.join(5)
+
+                self.assertFalse(background.is_alive())
+                self.assertEqual(background_errors, [])
+                final_live = json.loads(runtime_latest.read_text(encoding="utf-8"))
+                self.assertEqual(final_live["quote"]["bid"], 300.0)
+
     def test_disconnected_export_preserves_last_quote_without_claiming_live(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -370,10 +534,15 @@ class QuoteExporterTests(unittest.TestCase):
 
     def test_compaction_retains_recent_and_last_observed_older_buckets(self):
         def row(when: datetime, value: float) -> dict:
-            stamp = when.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            collected_stamp = when.isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            )
+            mt5_stamp = (when + timedelta(hours=3)).isoformat(
+                timespec="milliseconds"
+            ).replace("+00:00", "Z")
             return {
-                "tick_at": stamp,
-                "collected_at": stamp,
+                "tick_at": mt5_stamp,
+                "collected_at": collected_stamp,
                 "bid": value,
                 "ask": value + 0.5,
             }
@@ -435,6 +604,7 @@ class QuoteCollectorAndCliTests(unittest.TestCase):
         self.assertEqual(args.source_stale_after, 45)
         self.assertEqual(args.publish_interval, 600)
         self.assertEqual(args.database, Path("runtime/fixedstep-quotes.sqlite3"))
+        self.assertEqual(args.api_data_dir, Path("runtime/quote-api"))
         self.assertEqual(args.symbol, "FixedStep0.5")
 
     def test_six_hundred_second_refresh_cadence_has_no_catch_up_burst(self):

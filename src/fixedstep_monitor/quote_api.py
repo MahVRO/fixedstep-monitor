@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import ipaddress
+import json
+import math
 import socket
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
+from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,12 +22,45 @@ MAX_CONCURRENT_REQUESTS = 8
 MAX_REQUESTS_PER_MINUTE = 240
 REQUEST_TIMEOUT_SECONDS = 10.0
 
-_ROUTES = {
-    "/v1/quotes": "quotes.json",
-    "/v1/latest": "latest.json",
-}
+_QUOTE_ROUTE = "/v1/quotes"
+_LATEST_ROUTE = "/v1/latest"
 _ALLOWED_PREFLIGHT_HEADERS = {"cache-control", "pragma"}
 _HEALTH_PAYLOAD = b'{"status":"ok"}\n'
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _latest_payload_is_fresh(payload: bytes, now: datetime) -> bool:
+    """Fail closed when the live writer has stopped refreshing its snapshot."""
+
+    try:
+        document = json.loads(payload.decode("utf-8"))
+        generated_value = document["generated_at"]
+        collection = document["collection"]
+        stale_after = collection["source_stale_after_seconds"]
+        if (
+            not isinstance(generated_value, str)
+            or not isinstance(collection, dict)
+            or isinstance(stale_after, bool)
+            or not isinstance(stale_after, (int, float))
+            or not math.isfinite(float(stale_after))
+            or float(stale_after) <= 0
+        ):
+            return False
+        normalized = (
+            generated_value[:-1] + "+00:00"
+            if generated_value.endswith("Z")
+            else generated_value
+        )
+        generated_at = datetime.fromisoformat(normalized)
+        if generated_at.tzinfo is None or now.tzinfo is None:
+            return False
+        age_seconds = (now.astimezone(UTC) - generated_at.astimezone(UTC)).total_seconds()
+    except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return 0.0 <= age_seconds <= float(stale_after)
 
 
 def _loopback_host(host: str) -> str:
@@ -57,6 +94,19 @@ def _allowed_origin(origin: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def _exact_export_path(path: str | Path, *, name: str) -> Path:
+    candidate = Path(path).expanduser()
+    try:
+        if candidate.is_symlink():
+            raise ValueError(f"{name} must be a regular file, not a symlink")
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"{name} must be an existing regular file") from error
+    if not resolved.is_file():
+        raise ValueError(f"{name} must be an existing regular file")
+    return resolved
+
+
 class _QuoteHttpServer(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
@@ -65,11 +115,13 @@ class _QuoteHttpServer(ThreadingHTTPServer):
     def __init__(
         self,
         server_address: tuple[str, int],
-        data_dir: Path,
+        routes: dict[str, Path],
         allowed_origin: str,
+        clock: Callable[[], datetime],
     ) -> None:
-        self.data_dir = data_dir
+        self.routes = dict(routes)
         self.allowed_origin = allowed_origin
+        self.clock = clock
         self._request_slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
         self._rate_lock = threading.Lock()
         self._request_times: deque[float] = deque()
@@ -194,13 +246,12 @@ class _QuoteRequestHandler(BaseHTTPRequestHandler):
         except ValueError:
             return None
 
-    def _read_export(self, filename: str) -> bytes | None:
-        candidate = self.quote_server.data_dir / filename
+    def _read_export(self, candidate: Path) -> bytes | None:
         try:
             if candidate.is_symlink():
                 return None
             resolved = candidate.resolve(strict=True)
-            if resolved.parent != self.quote_server.data_dir or not resolved.is_file():
+            if resolved != candidate or not resolved.is_file():
                 return None
             if resolved.stat().st_size > MAX_RESPONSE_BYTES:
                 return None
@@ -215,14 +266,22 @@ class _QuoteRequestHandler(BaseHTTPRequestHandler):
         if path == "/healthz":
             self._send_payload(HTTPStatus.OK, _HEALTH_PAYLOAD, include_body=include_body)
             return
-        filename = _ROUTES.get(path or "")
-        if filename is None:
+        export_path = self.quote_server.routes.get(path or "")
+        if export_path is None:
             self._send_empty(HTTPStatus.NOT_FOUND)
             return
-        payload = self._read_export(filename)
+        payload = self._read_export(export_path)
         if payload is None:
             self._send_empty(HTTPStatus.SERVICE_UNAVAILABLE)
             return
+        if path == _LATEST_ROUTE:
+            try:
+                fresh = _latest_payload_is_fresh(payload, self.quote_server.clock())
+            except Exception:
+                fresh = False
+            if not fresh:
+                self._send_empty(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
         self._send_payload(HTTPStatus.OK, payload, include_body=include_body)
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
@@ -233,7 +292,7 @@ class _QuoteRequestHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
         path = self._path()
-        if path not in {*_ROUTES, "/healthz"}:
+        if path not in {*self.quote_server.routes, "/healthz"}:
             self._send_empty(HTTPStatus.NOT_FOUND)
             return
         if self.headers.get("Origin") != self.quote_server.allowed_origin:
@@ -278,19 +337,45 @@ class QuoteApiServer:
 
     def __init__(
         self,
-        data_dir: str | Path,
+        data_dir: str | Path | None = None,
         host: str = "127.0.0.1",
         port: int = 8765,
         allowed_origin: str = "https://mahvro.github.io",
+        *,
+        latest_path: str | Path | None = None,
+        quotes_path: str | Path | None = None,
+        clock: Callable[[], datetime] = _utc_now,
     ) -> None:
-        self.data_dir = Path(data_dir).expanduser().resolve()
-        if self.data_dir.exists() and not self.data_dir.is_dir():
-            raise ValueError("data_dir must be a directory")
+        if data_dir is not None:
+            if latest_path is not None or quotes_path is not None:
+                raise ValueError(
+                    "use either data_dir or explicit latest_path and quotes_path"
+                )
+            directory = Path(data_dir).expanduser().resolve()
+            if not directory.is_dir():
+                raise ValueError("data_dir must be an existing directory")
+            latest_path = directory / "latest.json"
+            quotes_path = directory / "quotes.json"
+        elif latest_path is None or quotes_path is None:
+            raise ValueError(
+                "latest_path and quotes_path are both required without data_dir"
+            )
+        self.latest_path = _exact_export_path(latest_path, name="latest_path")
+        self.quotes_path = _exact_export_path(quotes_path, name="quotes_path")
+        if self.latest_path == self.quotes_path:
+            raise ValueError("latest_path and quotes_path must be distinct files")
+        self.routes = {
+            _LATEST_ROUTE: self.latest_path,
+            _QUOTE_ROUTE: self.quotes_path,
+        }
         self.host = _loopback_host(host)
         if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
             raise ValueError("port must be an integer between 0 and 65535")
         self.port = port
         self.allowed_origin = _allowed_origin(allowed_origin)
+        if not callable(clock):
+            raise ValueError("clock must be callable")
+        self.clock = clock
         self._server: _QuoteHttpServer | None = None
         self._thread: threading.Thread | None = None
         self._lifecycle_lock = threading.Lock()
@@ -304,8 +389,9 @@ class QuoteApiServer:
             server_class = _QuoteHttpServerV6 if ":" in self.host else _QuoteHttpServer
             server = server_class(
                 (self.host, self.port),
-                data_dir=self.data_dir,
+                routes=self.routes,
                 allowed_origin=self.allowed_origin,
+                clock=self.clock,
             )
             thread = threading.Thread(
                 target=server.serve_forever,

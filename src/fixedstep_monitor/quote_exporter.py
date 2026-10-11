@@ -20,6 +20,10 @@ QUOTE_SCHEMA_VERSION = "fixedstep-quotes-v1"
 MAX_PUBLIC_SAMPLES = 18_000
 PUBLIC_HISTORY_DAYS = 90
 COVERAGE_METADATA_KEY = "quote_public_coverage_v1"
+MT5_TICK_TIME_BASIS = "mt5_reported_unverified"
+COLLECTOR_CLOCK_BASIS = "utc_serialized_host_clock_synchronization_not_asserted"
+CHART_TIME_BASIS = "collector_first_observation_host_clock"
+MATERIAL_CLOCK_OFFSET_SECONDS = 300.0
 # quote_api.py refuses responses above 4 MiB. Leave headroom for metadata and
 # small schema additions while guaranteeing the history endpoint stays usable.
 MAX_PUBLIC_JSON_BYTES = 3_500_000
@@ -113,6 +117,18 @@ def _public_quote(row: dict[str, Any], *, include_metadata: bool) -> dict[str, A
         item["trade_tick_size"] = (
             tick_size if tick_size is not None and tick_size > 0 else None
         )
+        item["tick_time_basis"] = MT5_TICK_TIME_BASIS
+        try:
+            reported_offset = (
+                parse_utc(tick_at) - parse_utc(collected_at)
+            ).total_seconds()
+        except (TypeError, ValueError):
+            reported_offset = None
+        if reported_offset is not None and math.isfinite(reported_offset):
+            item["mt5_reported_offset_seconds"] = round(reported_offset, 3)
+            item["mt5_reported_offset_material"] = (
+                abs(reported_offset) >= MATERIAL_CLOCK_OFFSET_SECONDS
+            )
     return item
 
 
@@ -122,8 +138,10 @@ def compact_quote_history(
     """Bound public history without interpolating or altering local samples.
 
     The latest 24 hours remain at the 15-second source cadence. Days 2-7 keep
-    the last observed tick in each UTC minute, and days 8-90 keep the last
-    observed tick in each UTC hour. Older samples remain local in SQLite.
+    the last first-observed tick in each collector-host-clock minute, and days
+    8-90 keep the last first-observed tick in each collector-host-clock hour.
+    Raw MT5 time never controls retention, bucketing, or ordering. The host
+    values are UTC-serialized, but synchronization is not asserted.
     """
 
     full_cutoff = now - timedelta(hours=24)
@@ -133,11 +151,11 @@ def compact_quote_history(
     minute: dict[str, dict[str, Any]] = {}
     hourly: dict[str, dict[str, Any]] = {}
     for sample in samples:
-        tick_at = sample.get("tick_at")
-        if not isinstance(tick_at, str):
+        collected_at = sample.get("collected_at")
+        if not isinstance(collected_at, str):
             continue
         try:
-            observed = parse_utc(tick_at)
+            observed = parse_utc(collected_at)
         except (TypeError, ValueError):
             continue
         if observed < public_cutoff:
@@ -150,7 +168,10 @@ def compact_quote_history(
             hourly[observed.strftime("%Y-%m-%dT%H")] = sample
     return sorted(
         list(hourly.values()) + list(minute.values()) + full,
-        key=lambda row: str(row.get("tick_at") or ""),
+        key=lambda row: (
+            str(row.get("collected_at") or ""),
+            str(row.get("tick_at") or ""),
+        ),
     )
 
 
@@ -167,6 +188,7 @@ class QuoteStaticExporter:
         public_base_url: str = "https://mahvro.github.io/fixedstep-monitor",
         clock=utc_now,
         write_lock: Any | None = None,
+        live_latest_path: str | Path | None = None,
     ) -> None:
         if symbol != "FixedStep0.5":
             raise ValueError("quote exporter requires the exact FixedStep0.5 symbol")
@@ -193,6 +215,11 @@ class QuoteStaticExporter:
         self.public_base_url = public_base_url.rstrip("/")
         self.clock = clock
         self.write_lock = write_lock or threading.RLock()
+        self.live_latest_path = (
+            Path(live_latest_path)
+            if live_latest_path is not None
+            else self.site_root / "ai" / "data" / "latest.json"
+        )
 
     def public_url(self, path: str) -> str:
         return f"{self.public_base_url}/{path.lstrip('/')}"
@@ -228,9 +255,12 @@ class QuoteStaticExporter:
             "maximum_public_json_bytes": MAX_PUBLIC_JSON_BYTES,
             "sampling_policy": (
                 "15-second source samples for the latest 24 hours; last observed sample "
-                "per UTC minute through day 7; last observed sample per UTC hour through day 90; "
-                "older samples are not published; no interpolation"
+                "per collector first-observation host-clock minute through day 7; last "
+                "observed sample per collector first-observation host-clock hour through "
+                "day 90; older samples are not "
+                "published; raw MT5 time does not control retention; no interpolation"
             ),
+            "chart_time_basis": CHART_TIME_BASIS,
         }
 
     def _saved_coverage(self) -> dict[str, Any]:
@@ -241,8 +271,10 @@ class QuoteStaticExporter:
         for key in (
             "quote_samples",
             "stored_quote_samples",
-            "quote_start_at",
-            "quote_end_at",
+            "collection_start_at",
+            "collection_end_at",
+            "mt5_reported_start_at",
+            "mt5_reported_end_at",
             "history_generated_at",
             "history_snapshot_id",
         ):
@@ -311,6 +343,15 @@ class QuoteStaticExporter:
             "snapshot_id": snapshot_id,
             "generated_at": iso_utc(now),
             "timezone": "UTC",
+            "collector_clock_basis": COLLECTOR_CLOCK_BASIS,
+            "timezone_applies_to": [
+                "generated_at",
+                "collection.collected_at",
+                "quote.collected_at",
+                "samples[].collected_at",
+            ],
+            "tick_time_basis": MT5_TICK_TIME_BASIS,
+            "chart_time_basis": CHART_TIME_BASIS,
             "symbol": self.symbol,
             "collection": collection,
             "quote": quote,
@@ -339,7 +380,7 @@ class QuoteStaticExporter:
                 samples=[],
             )
             _atomic_write(
-                self.site_root / "ai" / "data" / "latest.json",
+                self.live_latest_path,
                 self._encoded(payload),
             )
         return payload
@@ -377,8 +418,10 @@ class QuoteStaticExporter:
             }
         )
         if samples:
-            coverage["quote_start_at"] = samples[0]["tick_at"]
-            coverage["quote_end_at"] = samples[-1]["tick_at"]
+            coverage["collection_start_at"] = samples[0]["collected_at"]
+            coverage["collection_end_at"] = samples[-1]["collected_at"]
+            coverage["mt5_reported_start_at"] = samples[0]["tick_at"]
+            coverage["mt5_reported_end_at"] = samples[-1]["tick_at"]
 
         payload = self._payload(
             now=now,
@@ -399,11 +442,15 @@ class QuoteStaticExporter:
             del samples[:remove_count]
             coverage["quote_samples"] = len(samples)
             if samples:
-                coverage["quote_start_at"] = samples[0]["tick_at"]
-                coverage["quote_end_at"] = samples[-1]["tick_at"]
+                coverage["collection_start_at"] = samples[0]["collected_at"]
+                coverage["collection_end_at"] = samples[-1]["collected_at"]
+                coverage["mt5_reported_start_at"] = samples[0]["tick_at"]
+                coverage["mt5_reported_end_at"] = samples[-1]["tick_at"]
             else:
-                coverage.pop("quote_start_at", None)
-                coverage.pop("quote_end_at", None)
+                coverage.pop("collection_start_at", None)
+                coverage.pop("collection_end_at", None)
+                coverage.pop("mt5_reported_start_at", None)
+                coverage.pop("mt5_reported_end_at", None)
             history_text = self._encoded(payload)
 
         latest_payload = {**payload, "samples": []}
@@ -420,7 +467,7 @@ class QuoteStaticExporter:
             ("ask", "Ask", "#f4bd62"),
         ):
             points = [
-                (str(row["tick_at"]), float(row[key]))
+                (str(row["collected_at"]), float(row[key]))
                 for row in samples
                 if _finite(row.get(key)) is not None
             ]
@@ -432,13 +479,16 @@ class QuoteStaticExporter:
                 price_series,
                 y_label="Quoted price",
                 y_decimals=digits if isinstance(digits, int) else 3,
+                time_description=(
+                    "collector host-clock (UTC-serialized; synchronization not asserted)"
+                ),
             )
             or _empty_chart_svg(
                 "FixedStep0.5 bid, mid and ask", "No quote samples are available."
             )
         )
         spread_points = [
-            (str(row["tick_at"]), float(row["spread"]))
+            (str(row["collected_at"]), float(row["spread"]))
             for row in samples
             if _finite(row.get("spread")) is not None
         ]
@@ -448,6 +498,9 @@ class QuoteStaticExporter:
                 [("Ask - bid", "#b797ff", spread_points)],
                 y_label="Price units",
                 y_decimals=digits if isinstance(digits, int) else 3,
+                time_description=(
+                    "collector host-clock (UTC-serialized; synchronization not asserted)"
+                ),
             )
             or _empty_chart_svg(
                 "FixedStep0.5 spread", "No quote samples are available."
@@ -519,6 +572,10 @@ class QuoteStaticExporter:
             "snapshot_id": snapshot_id,
             "generated_at": generated_at,
             "timezone": "UTC",
+            "collector_clock_basis": COLLECTOR_CLOCK_BASIS,
+            "timezone_applies_to": payload["timezone_applies_to"],
+            "tick_time_basis": MT5_TICK_TIME_BASIS,
+            "chart_time_basis": CHART_TIME_BASIS,
             "symbol": self.symbol,
             "collection": collection,
             "coverage": coverage,
@@ -530,9 +587,9 @@ class QuoteStaticExporter:
         ai_html = self._ai_html(latest_payload, chart_entries)
 
         # All expensive selection, validation, serialization, and chart work
-        # occurs before this lock.  It only protects the short atomic bundle
-        # swap and optional local `git add`, keeping latest.json coherent with
-        # the exact files staged for publication.
+        # occurs before this static-bundle lock.  The live API file has a
+        # separate owner and path, so neither rendering nor optional Git
+        # staging can delay or overwrite the 15-second live snapshot.
         with self.write_lock:
             self._remove_legacy_public_files()
             _atomic_write(data_dir / "latest.json", latest_text)
@@ -563,6 +620,21 @@ class QuoteStaticExporter:
             decimals = digits if isinstance(digits, int) else 3
             return f"{number:.{decimals}f}"
 
+        reported_offset = _finite(quote.get("mt5_reported_offset_seconds"))
+        offset_text = (
+            f"{reported_offset:+.3f} seconds"
+            if reported_offset is not None
+            else "Unavailable"
+        )
+        offset_material = bool(quote.get("mt5_reported_offset_material"))
+        offset_note = (
+            "comparison unavailable"
+            if reported_offset is None
+            else "material clock difference"
+            if offset_material
+            else "no material clock difference detected"
+        )
+
         chart_html = "".join(
             f'<figure><img src="{html.escape(item["url"])}" alt="{html.escape(item["title"])}"><figcaption>{html.escape(item["title"])}</figcaption></figure>'
             for item in charts
@@ -572,8 +644,8 @@ class QuoteStaticExporter:
 <title>FixedStep0.5 quote data</title><style>body{{margin:0 auto;max-width:1100px;padding:32px;font:16px system-ui,sans-serif;background:#0a0e14;color:#eef4ff}}a{{color:#69b7ff}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}}.card,figure{{background:#121925;border:1px solid #26334d;border-radius:12px;padding:16px}}strong{{font-size:1.4rem}}img{{max-width:100%;height:auto}}code{{color:#c9d8ee}}</style></head>
 <body><header><h1>FixedStep0.5 quote data</h1><p>Read-only sampled bid and ask. No account, position, trade or P&amp;L data is collected by this runtime.</p></header>
 <section class="grid"><div class="card">Bid<br><strong>{html.escape(value("bid"))}</strong></div><div class="card">Mid<br><strong>{html.escape(value("mid"))}</strong></div><div class="card">Ask<br><strong>{html.escape(value("ask"))}</strong></div><div class="card">Spread<br><strong>{html.escape(value("spread"))}</strong></div></section>
-<section><h2>Freshness</h2><ul><li>Collection status: <code>{html.escape(str(collection.get("status", "unknown")))}</code></li><li>Collector observation: <code>{html.escape(str(collection.get("collected_at", "Unavailable")))}</code></li><li>Broker tick: <code>{html.escape(str(quote.get("tick_at", "Unavailable")))}</code></li><li>Generated: <code>{html.escape(str(payload["generated_at"]))}</code></li></ul></section>
+<section><h2>Freshness and time basis</h2><ul><li>Collection status: <code>{html.escape(str(collection.get("status", "unknown")))}</code></li><li>Backend collection age: <code>{html.escape(str(collection.get("collection_age_seconds", "Unavailable")))}</code> seconds</li><li>Latest successful collector observation: <code>{html.escape(str(collection.get("collected_at", "Unavailable")))}</code> (host clock, UTC-serialized; synchronization not asserted)</li><li>Quote first observed by collector: <code>{html.escape(str(quote.get("collected_at", "Unavailable")))}</code> (host clock; chart axis)</li><li>MT5-reported tick timestamp: <code>{html.escape(str(quote.get("tick_at", "Unavailable")))}</code> (preserved raw; time basis unverified; never used for freshness)</li><li>MT5-reported minus collector first-observation time: <code>{html.escape(offset_text)}</code> ({html.escape(offset_note)})</li><li>Generated: <code>{html.escape(str(payload["generated_at"]))}</code> (collector host clock)</li></ul></section>
 <section><h2>Machine-readable data</h2><ul><li><a href="{html.escape(payload["links"]["latest_json"])}">Latest JSON</a></li><li><a href="{html.escape(payload["links"]["quotes_json"])}">Quote history JSON</a></li><li><a href="{html.escape(payload["links"]["quotes_csv"])}">Quote history CSV</a></li><li><a href="{html.escape(payload["links"]["manifest"])}">Manifest</a></li></ul></section>
-<section><h2>Static charts</h2>{chart_html or '<p>No quote samples are available yet.</p>'}</section>
+<section><h2>Static charts</h2><p>Chart axes use collector first-observation host time, not the unverified MT5-reported timestamp. Values are UTC-serialized, but host synchronization is not asserted.</p>{chart_html or '<p>No quote samples are available yet.</p>'}</section>
 <footer><p><a href="{html.escape(payload["links"]["dashboard"])}">Interactive dashboard</a> · Source sampling target: {self.expected_collection_interval_seconds}s · Static fallback publication target: {self.expected_publish_interval_seconds}s.</p></footer></body></html>
 """
