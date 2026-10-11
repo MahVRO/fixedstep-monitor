@@ -18,7 +18,7 @@ The static GitHub Pages export remains an independent fallback.
 
 - `POST /v1/ingest` requires `Authorization: Bearer <INGEST_TOKEN>`.
 - `GET /v1/latest` returns the newest quote and request-time freshness.
-- `GET /v1/quotes?limit=360` returns 1–8,640 observations in ascending order.
+- `GET /v1/quotes?limit=360` returns 1–360 observations in ascending order.
 - `GET /healthz` checks that the D1 binding is reachable.
 
 Only the exact browser origin `https://mahvro.github.io` receives a CORS allow
@@ -115,8 +115,13 @@ request-time freshness, exact CORS, bounded history, and 24-hour pruning.
 
 - Authenticated ingestion is limited to 30 requests per minute in D1, with an
   additional best-effort per-client edge bound.
-- Public reads have a best-effort 240 requests/minute/client bound.
-- History responses contain at most 8,640 points and 3.5 MB.
+- Public reads have separate best-effort per-client bounds: 30 latest reads,
+  four history reads, and 12 health checks per minute. These counters are
+  isolated from authenticated ingestion so a normal collector cannot throttle
+  a dashboard sharing the same public IP.
+- History responses contain at most 360 points and 3.5 MB. At the 10-second
+  source cadence this is one hour; the compact 90-day archive remains on
+  GitHub Pages.
 - Rows older than 24 hours are pruned after every newly accepted snapshot. The
   compact 90-day public archive remains in the independent GitHub Pages bundle.
 - A new quote every 10 seconds is six ingests per minute, comfortably below the

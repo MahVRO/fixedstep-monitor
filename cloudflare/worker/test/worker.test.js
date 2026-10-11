@@ -296,8 +296,45 @@ test("history is ascending, bounded by limit, and quote-only", async () => {
   assert.equal(findForbiddenField(history), null);
   assert.equal(history.coverage.retention_hours, 24);
 
-  const invalid = await runtime.fetch(new Request("https://relay.example/v1/quotes?limit=8641"), env);
+  const invalid = await runtime.fetch(new Request("https://relay.example/v1/quotes?limit=361"), env);
   assert.equal(invalid.status, 400);
+});
+
+test("public route limits are bounded and isolated from ingest authentication", async () => {
+  const runtime = createWorker({ now: () => BASE_NOW });
+  const env = environment();
+  const sharedHeaders = { "CF-Connecting-IP": "203.0.113.5" };
+
+  assert.equal((await ingest(runtime, env, validPayload())).status, 201);
+  for (let index = 0; index < limits.historyRequestsPerMinute; index += 1) {
+    const response = await runtime.fetch(new Request("https://relay.example/v1/quotes", {
+      headers: sharedHeaders,
+    }), env);
+    assert.equal(response.status, 200);
+  }
+  assert.equal((await runtime.fetch(new Request("https://relay.example/v1/quotes", {
+    headers: sharedHeaders,
+  }), env)).status, 429);
+
+  for (let index = 0; index < limits.healthRequestsPerMinute; index += 1) {
+    const response = await runtime.fetch(new Request("https://relay.example/healthz", {
+      headers: sharedHeaders,
+    }), env);
+    assert.equal(response.status, 200);
+  }
+  assert.equal((await runtime.fetch(new Request("https://relay.example/healthz", {
+    headers: sharedHeaders,
+  }), env)).status, 429);
+
+  for (let index = 0; index < limits.latestRequestsPerMinute; index += 1) {
+    const response = await runtime.fetch(new Request("https://relay.example/v1/latest", {
+      headers: sharedHeaders,
+    }), env);
+    assert.equal(response.status, 200);
+  }
+  assert.equal((await runtime.fetch(new Request("https://relay.example/v1/latest", {
+    headers: sharedHeaders,
+  }), env)).status, 429);
 });
 
 test("CORS is emitted only for the exact GitHub Pages origin", async () => {

@@ -4,11 +4,13 @@ const ALLOWED_ORIGIN = "https://mahvro.github.io";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_RESPONSE_BYTES = 3_500_000;
-const MAX_HISTORY_LIMIT = 8_640;
+const MAX_HISTORY_LIMIT = 360;
 const DEFAULT_HISTORY_LIMIT = 360;
 const RETENTION_MS = 24 * 60 * 60 * 1000;
 const INGESTS_PER_MINUTE = 30;
-const PUBLIC_REQUESTS_PER_MINUTE = 240;
+const LATEST_REQUESTS_PER_MINUTE = 30;
+const HISTORY_REQUESTS_PER_MINUTE = 4;
+const HEALTH_REQUESTS_PER_MINUTE = 12;
 const AUTH_ATTEMPTS_PER_MINUTE = 60;
 
 const FORBIDDEN_FIELD_NAMES = new Set([
@@ -320,10 +322,10 @@ function bearerToken(request) {
   return match ? match[1] : "";
 }
 
-function clientRateAllowed(request, nowMs, limit) {
+function clientRateAllowed(request, nowMs, limit, scope) {
   const address = request.headers.get("CF-Connecting-IP") || "unknown";
   const bucket = Math.floor(nowMs / 60_000);
-  const key = `${address}:${bucket}`;
+  const key = `${scope}:${address}:${bucket}`;
   const current = publicRateWindows.get(key) || 0;
   publicRateWindows.set(key, current + 1);
   if (publicRateWindows.size > 2_000) {
@@ -422,7 +424,7 @@ async function latestRow(db, nowMs) {
 }
 
 async function handleIngest(request, env, nowMs) {
-  if (!clientRateAllowed(request, nowMs, AUTH_ATTEMPTS_PER_MINUTE)) {
+  if (!clientRateAllowed(request, nowMs, AUTH_ATTEMPTS_PER_MINUTE, "auth")) {
     return errorResponse(request, 429, "rate_limited");
   }
   if (!env.QUOTES_DB || typeof env.INGEST_TOKEN !== "string") {
@@ -651,12 +653,24 @@ export function createWorker({ now = () => Date.now() } = {}) {
         response.headers.set("Allow", url.pathname === "/v1/ingest" ? "POST" : "GET, HEAD, OPTIONS");
         return response;
       }
-      if (!clientRateAllowed(request, nowMs, PUBLIC_REQUESTS_PER_MINUTE)) {
-        return errorResponse(request, 429, "rate_limited");
+      if (url.pathname === "/healthz" && url.search === "") {
+        if (!clientRateAllowed(request, nowMs, HEALTH_REQUESTS_PER_MINUTE, "health")) {
+          return errorResponse(request, 429, "rate_limited");
+        }
+        return handleHealth(request, env);
       }
-      if (url.pathname === "/healthz" && url.search === "") return handleHealth(request, env);
-      if (url.pathname === "/v1/latest" && url.search === "") return handleLatest(request, env, nowMs);
-      if (url.pathname === "/v1/quotes") return handleHistory(request, env, nowMs, url);
+      if (url.pathname === "/v1/latest" && url.search === "") {
+        if (!clientRateAllowed(request, nowMs, LATEST_REQUESTS_PER_MINUTE, "latest")) {
+          return errorResponse(request, 429, "rate_limited");
+        }
+        return handleLatest(request, env, nowMs);
+      }
+      if (url.pathname === "/v1/quotes") {
+        if (!clientRateAllowed(request, nowMs, HISTORY_REQUESTS_PER_MINUTE, "history")) {
+          return errorResponse(request, 429, "rate_limited");
+        }
+        return handleHistory(request, env, nowMs, url);
+      }
       return errorResponse(request, 404, "not_found");
     },
   };
@@ -671,6 +685,10 @@ export const limits = Object.freeze({
   maxHistoryLimit: MAX_HISTORY_LIMIT,
   retentionMs: RETENTION_MS,
   ingestsPerMinute: INGESTS_PER_MINUTE,
+  latestRequestsPerMinute: LATEST_REQUESTS_PER_MINUTE,
+  historyRequestsPerMinute: HISTORY_REQUESTS_PER_MINUTE,
+  healthRequestsPerMinute: HEALTH_REQUESTS_PER_MINUTE,
+  authAttemptsPerMinute: AUTH_ATTEMPTS_PER_MINUTE,
 });
 
 export default createWorker();
