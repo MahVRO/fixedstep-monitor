@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "snapshot_id": "bfc39dbe-3728-47bc-86bd-070b44e1d984",
-  "generated_at": "2026-10-11T01:36:30.718Z",
+  "snapshot_id": "c53e7dc7-444d-4b0d-9118-b549ad856836",
+  "generated_at": "2026-10-11T01:41:32.725Z",
   "timezone": "UTC",
   "scope": {
     "account": "account-wide MT5 account observations",
@@ -100,8 +100,8 @@
   },
   "collection": {
     "status": "no_data",
-    "generated_at": "2026-10-11T01:36:30.718Z",
-    "published_at": "2026-10-11T01:36:30.718Z",
+    "generated_at": "2026-10-11T01:41:32.725Z",
+    "published_at": "2026-10-11T01:41:32.725Z",
     "source_stale_after_seconds": 180,
     "public_stale_after_seconds": 1200,
     "expected_collection_interval_seconds": 60,
@@ -131,7 +131,7 @@
         "timezone"
       ],
       "size_bytes": 5009,
-      "sha256": "333002d393673362c58e6c958574e8d8dc774925d0e5827d20159c84d63c537a"
+      "sha256": "6b027ea2348569fd16abccfe2f9dd5693a4bbf2025570d0b1ebee339ffc48602"
     },
     {
       "title": "Trades",
@@ -140,7 +140,7 @@
       "row_count": 0,
       "available_fields": [],
       "size_bytes": 4226,
-      "sha256": "4c31dd79837bdda79e23d30b45e31a11d41ac5b6c8a1479f97a8d1d94f826596"
+      "sha256": "218e15e1f76b44c76d5e463c341edf39c5b98b3496f86e72b5bd99b3eb9a36bd"
     },
     {
       "title": "Equity history",
@@ -149,7 +149,7 @@
       "row_count": 0,
       "available_fields": [],
       "size_bytes": 4107,
-      "sha256": "1317eae2cdd3df16401d819f41ad29518acc4331f6b1f4b529ee01ca08141253"
+      "sha256": "e1c1ba080f1cba7854fde63c5bd349727cb38c5e1b77cc5b069641e7c6477b16"
     },
     {
       "title": "Statistics",
@@ -158,7 +158,7 @@
       "row_count": 0,
       "available_fields": [],
       "size_bytes": 4161,
-      "sha256": "4c8270df26fa7dcfc5874d0c5ac3d536f9eb123c5ff4d39d0a77cbcb8d0eb237"
+      "sha256": "025c4fa7bf793bf57fd644b6b5d1d4c2690bc91149bf2165b6781694900e181f"
     },
     {
       "title": "Strategy state",
@@ -167,7 +167,7 @@
       "row_count": 0,
       "available_fields": [],
       "size_bytes": 4123,
-      "sha256": "720efa610ad7329d2db05aaace2d18216384b98512bdf28ef6a3c6fa4162890f"
+      "sha256": "dc4650cc6223434618d62031c499150419aa072cfbad2da40980414bf0c66c9c"
     },
     {
       "title": "Trades",
@@ -227,8 +227,8 @@
   "charts": [],
   "freshness": {
     "status": "no_data",
-    "generated_at": "2026-10-11T01:36:30.718Z",
-    "published_at": "2026-10-11T01:36:30.718Z",
+    "generated_at": "2026-10-11T01:41:32.725Z",
+    "published_at": "2026-10-11T01:41:32.725Z",
     "source_stale_after_seconds": 180,
     "public_stale_after_seconds": 1200,
     "expected_collection_interval_seconds": 60,

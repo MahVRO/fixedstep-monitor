@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "snapshot_id": "bfc39dbe-3728-47bc-86bd-070b44e1d984",
-  "generated_at": "2026-10-11T01:36:30.718Z",
+  "snapshot_id": "c53e7dc7-444d-4b0d-9118-b549ad856836",
+  "generated_at": "2026-10-11T01:41:32.725Z",
   "timezone": "UTC",
   "scope": {
     "account": "account-wide MT5 account observations",
@@ -100,8 +100,8 @@
   },
   "collection": {
     "status": "no_data",
-    "generated_at": "2026-10-11T01:36:30.718Z",
-    "published_at": "2026-10-11T01:36:30.718Z",
+    "generated_at": "2026-10-11T01:41:32.725Z",
+    "published_at": "2026-10-11T01:41:32.725Z",
     "source_stale_after_seconds": 180,
     "public_stale_after_seconds": 1200,
     "expected_collection_interval_seconds": 60,
