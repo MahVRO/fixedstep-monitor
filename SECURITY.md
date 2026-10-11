@@ -1,24 +1,35 @@
 # Security model
 
-This project is a one-way, read-only telemetry exporter. It intentionally has no HTTP server, inbound control channel, webhook receiver, or trading action.
+The active runtime is a one-way FixedStep0.5 market-quote reader. It has no account reader, strategy control, trade execution, webhook, mutation route, or general-purpose file server.
 
-## Hard boundaries
+## MT5 boundary
 
-- The MT5 adapter uses an explicit read-call allowlist. Order placement, order checking, modification, cancellation, and position closing are forbidden.
-- The collector writes only to its own SQLite database and generated public-output directory.
-- Public export uses an allowlist. Broker login/account number, broker server, credentials, tokens, machine names, IP addresses, local paths, raw comments, and raw configuration are not exported.
-- The private SQLite database, logs, local configuration, and credentials are excluded from Git.
-- Missing evidence is omitted and recorded as an omission; it is never converted to zero.
-- Strategy-specific metrics require an explicit strategy selector, such as a reviewed MT5 magic number, and explicit state fields require a reviewed state file. Account-wide data is labelled as account scope.
+The dedicated `QuoteOnlyMT5` allowlist is exactly `initialize`, `shutdown`, `terminal_info`, `symbol_info`, and `symbol_info_tick`. It does not call account, position, order, deal-history, symbol-selection, or execution APIs. The exact `FixedStep0.5` symbol must exist; no substitute is accepted.
+
+The legacy account-monitor source remains in the repository for historical compatibility, but the installed quote task does not instantiate or schedule it and uses a separate database and stop marker.
+
+## Public-data boundary
+
+Public values are constructed from an explicit allowlist: UTC collection and tick times, bid, ask, optional positive Last, derived mid and spread, and non-sensitive symbol precision metadata. `last=0.0` is treated as unavailable. Missing and non-finite values are omitted or `null`, never converted into observations.
+
+No account balance, equity, margin, P&L, currency, login, broker server, position, trade, order, ticket, magic number, comment, machine name, path, IP address, token, or credential belongs in `docs\ai` or the live response.
+
+## Live API boundary
+
+The Python server binds only to a loopback address and exposes bounded JSON from generated files:
+
+- `GET`/`HEAD /v1/quotes`
+- `GET`/`HEAD /v1/latest`
+- restricted CORS preflight where supported
+
+It has no query-driven file lookup, directory listing, write method, credentials, cookies, or control action. Responses use `Cache-Control: no-store`; CORS is restricted to the configured dashboard origin and does not allow credentials. Any public HTTPS proxy must forward only to this loopback service and must not expose MT5, SQLite, logs, source files, or other MINIPC services.
 
 ## Publishing credential
 
-Do not copy a broad personal GitHub token to the trading host. Use a repository-scoped, fine-grained credential or a write-enabled deploy key dedicated to `MahVRO/fixedstep-monitor`. Store it in Windows Credential Manager or the SSH agent, never in this repository, `config.json`, task arguments, or logs.
+Use only a write-enabled deploy key dedicated to `MahVRO/fixedstep-monitor`. Never place a personal token, private key, or credential in the repository, command arguments, task definition, generated JSON, or logs.
+
+Publication runs in one background worker and never on the quote-collection thread. Triggers coalesce, Git is non-interactive and time-bounded, and diagnostics redact credentials and local paths. The worker stages the atomic public bundle under a short lock, refuses to commit unrelated staged paths, then commits that exact index snapshot and releases the lock before any network push.
 
 ## Public-data warning
 
-Everything committed to the public snapshot branch and served by GitHub Pages can be copied, cached, indexed, or archived. Removing a later snapshot cannot guarantee deletion of an earlier public copy.
-
-## Reporting a problem
-
-Stop the independent collector and disable publication if an unexpected field appears. Stopping this monitor must not require stopping or changing any trading system.
+Anything exposed by the live endpoint or committed to the public snapshot branch can be copied, cached, indexed, or archived. Removing a later snapshot cannot guarantee deletion of an earlier public response.

@@ -72,11 +72,22 @@ CREATE TABLE IF NOT EXISTS monitor_metadata (
     value_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS quote_samples (
+    symbol TEXT NOT NULL,
+    tick_time_msc INTEGER NOT NULL,
+    tick_at TEXT NOT NULL,
+    first_collected_at TEXT NOT NULL,
+    last_collected_at TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    PRIMARY KEY(symbol, tick_time_msc)
+);
+
 CREATE INDEX IF NOT EXISTS idx_runs_attempted ON collection_runs(attempted_at);
 CREATE INDEX IF NOT EXISTS idx_account_observed ON account_samples(observed_at);
 CREATE INDEX IF NOT EXISTS idx_trades_exit ON closed_trades(exit_time);
 CREATE INDEX IF NOT EXISTS idx_strategy_observed ON strategy_samples(observed_at);
 CREATE INDEX IF NOT EXISTS idx_events_observed ON strategy_events(observed_at);
+CREATE INDEX IF NOT EXISTS idx_quotes_tick_at ON quote_samples(symbol, tick_at);
 """
 
 
@@ -263,6 +274,69 @@ class MonitorStore:
                 (finished, str(error)[:2000], run_id),
             )
 
+    def record_quote_success(
+        self,
+        run_id: str,
+        snapshot: Mapping[str, Any],
+        *,
+        completed_at: str | None = None,
+    ) -> None:
+        """Persist one sampled quote and mark its collection run successful.
+
+        The primary key is the broker tick timestamp, not the polling timestamp.
+        Re-reading an unchanged weekend/closed-market tick therefore updates its
+        last-seen time without inventing another market observation.
+        """
+
+        observed_at = str(snapshot["observed_at"])
+        quote = dict(snapshot.get("quote") or {})
+        symbol = quote.get("symbol")
+        tick_at = quote.get("tick_at")
+        tick_time_msc = quote.get("tick_time_msc")
+        if not isinstance(symbol, str) or not symbol:
+            raise ValueError("quote symbol is required")
+        if not isinstance(tick_at, str) or not tick_at:
+            raise ValueError("quote tick_at is required")
+        if isinstance(tick_time_msc, bool) or not isinstance(tick_time_msc, int):
+            raise ValueError("quote tick_time_msc is required")
+
+        item = {
+            key: value
+            for key, value in quote.items()
+            if key != "tick_time_msc" and value is not None
+        }
+        item["collected_at"] = observed_at
+        finished = completed_at or iso_utc(utc_now())
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO quote_samples(
+                    symbol, tick_time_msc, tick_at, first_collected_at,
+                    last_collected_at, data_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, tick_time_msc) DO UPDATE SET
+                    tick_at = excluded.tick_at,
+                    last_collected_at = excluded.last_collected_at,
+                    data_json = excluded.data_json
+                """,
+                (
+                    symbol,
+                    tick_time_msc,
+                    tick_at,
+                    observed_at,
+                    observed_at,
+                    _json(item),
+                ),
+            )
+            self.connection.execute(
+                """
+                UPDATE collection_runs
+                SET completed_at = ?, connected = 1, error = NULL
+                WHERE run_id = ?
+                """,
+                (finished, run_id),
+            )
+
     def set_metadata(self, key: str, value: Any) -> None:
         with self.connection:
             self.connection.execute(
@@ -282,6 +356,16 @@ class MonitorStore:
     def latest_run(self) -> dict[str, Any] | None:
         row = self.connection.execute(
             "SELECT * FROM collection_runs ORDER BY attempted_at DESC, run_id DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+    def last_successful_quote_run(self) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM collection_runs
+            WHERE connected = 1
+            ORDER BY attempted_at DESC, run_id DESC LIMIT 1
+            """
         ).fetchone()
         return dict(row) if row else None
 
@@ -357,6 +441,114 @@ class MonitorStore:
         ).fetchall()
         return [_loads(row["event_json"]) for row in rows]
 
+    def quote_samples(self, symbol: str = "FixedStep0.5") -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT tick_at, first_collected_at, last_collected_at, data_json
+            FROM quote_samples
+            WHERE symbol = ?
+            ORDER BY tick_time_msc
+            """,
+            (symbol,),
+        ).fetchall()
+        output: list[dict[str, Any]] = []
+        for row in rows:
+            item = _loads(row["data_json"])
+            item["tick_at"] = row["tick_at"]
+            item["collected_at"] = row["last_collected_at"]
+            output.append(item)
+        return output
+
+    def quote_samples_for_public_window(
+        self,
+        *,
+        public_cutoff: str,
+        minute_cutoff: str,
+        full_cutoff: str,
+        symbol: str = "FixedStep0.5",
+    ) -> list[dict[str, Any]]:
+        """Return only public-resolution rows from the bounded 90-day window.
+
+        SQL selects every tick from the newest 24 hours, the last observed tick
+        in each UTC minute for days 2-7, and the last observed tick in each UTC
+        hour for days 8-90.  Python therefore decodes only publishable rows,
+        rather than hundreds of thousands of full-cadence local observations.
+        """
+
+        rows = self.connection.execute(
+            """
+            WITH selected_ticks(tick_time_msc) AS (
+                SELECT tick_time_msc
+                FROM quote_samples
+                WHERE symbol = ? AND tick_at >= ?
+
+                UNION
+
+                SELECT MAX(tick_time_msc)
+                FROM quote_samples
+                WHERE symbol = ? AND tick_at >= ? AND tick_at < ?
+                GROUP BY substr(tick_at, 1, 16)
+
+                UNION
+
+                SELECT MAX(tick_time_msc)
+                FROM quote_samples
+                WHERE symbol = ? AND tick_at >= ? AND tick_at < ?
+                GROUP BY substr(tick_at, 1, 13)
+            )
+            SELECT q.tick_at, q.first_collected_at, q.last_collected_at, q.data_json
+            FROM quote_samples AS q
+            JOIN selected_ticks AS selected
+              ON selected.tick_time_msc = q.tick_time_msc
+            WHERE q.symbol = ?
+            ORDER BY q.tick_time_msc
+            """,
+            (
+                symbol,
+                full_cutoff,
+                symbol,
+                minute_cutoff,
+                full_cutoff,
+                symbol,
+                public_cutoff,
+                minute_cutoff,
+                symbol,
+            ),
+        ).fetchall()
+        output: list[dict[str, Any]] = []
+        for row in rows:
+            item = _loads(row["data_json"])
+            item["tick_at"] = row["tick_at"]
+            item["collected_at"] = row["last_collected_at"]
+            output.append(item)
+        return output
+
+    def quote_sample_count(self, symbol: str = "FixedStep0.5") -> int:
+        """Count retained local quotes without materializing their JSON."""
+
+        row = self.connection.execute(
+            "SELECT COUNT(*) FROM quote_samples WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def latest_quote(self, symbol: str = "FixedStep0.5") -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT tick_at, last_collected_at, data_json
+            FROM quote_samples
+            WHERE symbol = ?
+            ORDER BY tick_time_msc DESC LIMIT 1
+            """,
+            (symbol,),
+        ).fetchone()
+        if row is None:
+            return None
+        item = _loads(row["data_json"])
+        item["tick_at"] = row["tick_at"]
+        item["collected_at"] = row["last_collected_at"]
+        return item
+
     def counts(self) -> dict[str, int]:
         tables = {
             "collection_runs": "collection_runs",
@@ -364,6 +556,7 @@ class MonitorStore:
             "closed_trades": "closed_trades",
             "strategy_samples": "strategy_samples",
             "events": "strategy_events",
+            "quote_samples": "quote_samples",
         }
         output: dict[str, int] = {}
         for key, table in tables.items():

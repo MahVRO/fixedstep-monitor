@@ -4,8 +4,10 @@ import math
 import os
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 
 DEFAULT_GIT_TIMEOUT_SECONDS = 120.0
@@ -37,6 +39,134 @@ class PublishResult:
     changed: bool
     committed: bool
     pushed: bool
+
+
+@dataclass(frozen=True)
+class PublishWorkerSnapshot:
+    requested: int
+    started: int
+    completed: int
+    coalesced: int
+    failures: int
+    running: bool
+    pending: bool
+    stopping: bool
+    last_error: str | None
+
+
+class CoalescingPublishWorker:
+    """Run publication off the collector thread with at most one pending run.
+
+    A single worker thread guarantees that Git commands never overlap.  While
+    one publication is running, any number of requests collapse into one
+    trailing run so a slow network cannot build an unbounded queue.
+    """
+
+    def __init__(
+        self,
+        publish: Callable[[], PublishResult],
+        *,
+        on_complete: Callable[[PublishResult | None, str | None], None] | None = None,
+    ) -> None:
+        self._publish = publish
+        self._on_complete = on_complete
+        self._condition = threading.Condition()
+        self._pending = False
+        self._running = False
+        self._stopping = False
+        self._drain = True
+        self._requested = 0
+        self._started = 0
+        self._completed = 0
+        self._coalesced = 0
+        self._failures = 0
+        self._last_error: str | None = None
+        self._thread = threading.Thread(
+            target=self._run,
+            name="fixedstep-git-publisher",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def request(self) -> bool:
+        """Queue a publication without waiting; return false when coalesced."""
+
+        with self._condition:
+            if self._stopping:
+                return False
+            self._requested += 1
+            if self._pending:
+                self._coalesced += 1
+                return False
+            self._pending = True
+            self._condition.notify()
+            return True
+
+    @property
+    def snapshot(self) -> PublishWorkerSnapshot:
+        with self._condition:
+            return PublishWorkerSnapshot(
+                requested=self._requested,
+                started=self._started,
+                completed=self._completed,
+                coalesced=self._coalesced,
+                failures=self._failures,
+                running=self._running,
+                pending=self._pending,
+                stopping=self._stopping,
+                last_error=self._last_error,
+            )
+
+    @property
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def shutdown(self, *, drain: bool = True, timeout: float | None = None) -> bool:
+        """Stop accepting work and join the worker after any active Git call."""
+
+        with self._condition:
+            self._stopping = True
+            self._drain = bool(drain)
+            if not self._drain:
+                self._pending = False
+            self._condition.notify_all()
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                self._condition.wait_for(lambda: self._pending or self._stopping)
+                if self._stopping and (not self._drain or not self._pending):
+                    return
+                self._pending = False
+                self._running = True
+                self._started += 1
+
+            result: PublishResult | None = None
+            error: str | None = None
+            try:
+                result = self._publish()
+            except PublishError as exc:
+                error = str(exc)
+            except Exception as exc:
+                # Arbitrary callback errors may include paths or endpoints in
+                # their messages.  Keep diagnostics useful without exposing it.
+                error = f"{type(exc).__name__}: publication failed"
+
+            with self._condition:
+                self._running = False
+                self._completed += 1
+                if error is not None:
+                    self._failures += 1
+                self._last_error = error
+                self._condition.notify_all()
+
+            if self._on_complete is not None:
+                try:
+                    self._on_complete(result, error)
+                except Exception:
+                    pass
 
 
 class GitPublisher:
@@ -146,11 +276,24 @@ class GitPublisher:
             self._raise_for_result(staged)
         if staged.returncode == 0:
             return False
+        staged_paths = self._git(
+            "diff", "--cached", "--name-only", "-z"
+        ).stdout.split("\0")
+        generated_prefix = self.generated_path.as_posix().rstrip("/") + "/"
+        if any(
+            path
+            and path != self.generated_path.as_posix()
+            and not path.startswith(generated_prefix)
+            for path in staged_paths
+        ):
+            raise PublishError(
+                "publication index contains staged changes outside the generated path"
+            )
         if rolling_snapshot:
             self._git("rev-parse", "--verify", "HEAD")
-            self._git("commit", "--amend", "--no-edit", "--", self.generated_path.as_posix())
+            self._git("commit", "--amend", "--no-edit")
         else:
-            self._git("commit", "-m", message, "--", self.generated_path.as_posix())
+            self._git("commit", "-m", message)
         return True
 
     def push(
@@ -183,6 +326,24 @@ class GitPublisher:
         branch: str | None = None,
         rolling_snapshot: bool = False,
     ) -> PublishResult:
+        self.validate_rolling_snapshot(
+            branch=branch,
+            rolling_snapshot=rolling_snapshot,
+        )
+        changed = self.stage()
+        return self._finish_staged(
+            changed=changed,
+            commit=commit,
+            push=push,
+            message=message,
+            remote=remote,
+            branch=branch,
+            rolling_snapshot=rolling_snapshot,
+        )
+
+    def validate_rolling_snapshot(
+        self, *, branch: str | None, rolling_snapshot: bool
+    ) -> None:
         if rolling_snapshot:
             if not branch:
                 raise PublishError("a branch is required for rolling-snapshot publication")
@@ -191,7 +352,45 @@ class GitPublisher:
                 raise PublishError(
                     f"rolling-snapshot publication requires the checked-out branch to be {branch!r}"
                 )
-        changed = self.stage()
+
+    def finish_staged(
+        self,
+        *,
+        changed: bool,
+        commit: bool = False,
+        push: bool = False,
+        message: str = "Update FixedStep0.5 monitoring snapshot",
+        remote: str = "origin",
+        branch: str | None = None,
+        rolling_snapshot: bool = False,
+    ) -> PublishResult:
+        """Commit and push a snapshot already captured in the Git index."""
+
+        self.validate_rolling_snapshot(
+            branch=branch,
+            rolling_snapshot=rolling_snapshot,
+        )
+        return self._finish_staged(
+            changed=changed,
+            commit=commit,
+            push=push,
+            message=message,
+            remote=remote,
+            branch=branch,
+            rolling_snapshot=rolling_snapshot,
+        )
+
+    def _finish_staged(
+        self,
+        *,
+        changed: bool,
+        commit: bool,
+        push: bool,
+        message: str,
+        remote: str,
+        branch: str | None,
+        rolling_snapshot: bool,
+    ) -> PublishResult:
         committed = self.commit(message, rolling_snapshot=rolling_snapshot) if commit and changed else False
         pushed = False
         if push and committed:
