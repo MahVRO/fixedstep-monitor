@@ -3,11 +3,13 @@ from __future__ import annotations
 import ast
 import hashlib
 import inspect
+import io
 import json
 import tempfile
 import textwrap
 import threading
 import unittest
+from contextlib import redirect_stderr
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -579,38 +581,57 @@ class FakeQuoteAdapter:
 
 
 class QuoteCollectorAndCliTests(unittest.TestCase):
-    def test_collector_accepts_fifteen_seconds_and_exports(self):
+    def test_collector_accepts_ten_seconds_and_rejects_nine(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with MonitorStore(root / "quotes.sqlite3") as store:
-                exporter = QuoteStaticExporter(store, root / "docs", clock=lambda: NOW)
+                exporter = QuoteStaticExporter(
+                    store,
+                    root / "docs",
+                    expected_collection_interval_seconds=10,
+                    clock=lambda: NOW,
+                )
                 collector = QuoteCollector(
                     store,
                     exporter,
                     FakeQuoteAdapter,
-                    config=QuoteCollectorConfig(interval_seconds=15),
+                    config=QuoteCollectorConfig(interval_seconds=10),
                     clock=lambda: NOW,
                 )
                 payload = collector.run_once()
                 self.assertEqual(payload["collection"]["status"], "live")
+                self.assertEqual(
+                    payload["collection"]["expected_collection_interval_seconds"],
+                    10,
+                )
                 self.assertEqual(store.counts()["account_samples"], 0)
                 self.assertEqual(store.counts()["quote_samples"], 1)
         with self.assertRaises(ValueError):
-            QuoteCollectorConfig(interval_seconds=14)
+            QuoteCollectorConfig(interval_seconds=9)
 
     def test_quote_live_cli_defaults(self):
         args = build_parser().parse_args(["quote-live"])
-        self.assertEqual(args.interval, 15)
+        self.assertEqual(args.interval, 10)
         self.assertEqual(args.source_stale_after, 45)
         self.assertEqual(args.publish_interval, 600)
+        self.assertEqual(args.realtime_timeout, 5.0)
+        self.assertIsNone(args.realtime_ingest_url)
         self.assertEqual(args.database, Path("runtime/fixedstep-quotes.sqlite3"))
         self.assertEqual(args.api_data_dir, Path("runtime/quote-api"))
         self.assertEqual(args.symbol, "FixedStep0.5")
 
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            build_parser().parse_args(["quote-live", "--interval", "9"])
+
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            build_parser().parse_args([])
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            build_parser().parse_args(["collect"])
+
     def test_six_hundred_second_refresh_cadence_has_no_catch_up_burst(self):
         deadline = 600.0
         due_times: list[float] = []
-        for now in range(0, 601, 15):
+        for now in range(0, 601, 10):
             deadline, due = _advance_periodic_deadline(deadline, float(now), 600)
             if due:
                 due_times.append(float(now))

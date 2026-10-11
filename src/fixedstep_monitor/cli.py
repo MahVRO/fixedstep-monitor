@@ -8,14 +8,17 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from .collector import Collector, CollectorConfig
-from .exporter import StaticExporter
-from .mt5_readonly import QuoteOnlyMT5, ReadOnlyMT5
+from .mt5_readonly import QuoteOnlyMT5
+from .outbound_sink import (
+    LatestWinsPublishWorker,
+    OutboundPublishError,
+    OutboundPublishResult,
+    OutboundQuotePublisher,
+)
 from .publisher import CoalescingPublishWorker, GitPublisher, PublishError, PublishResult
 from .quote_collector import QuoteCollector, QuoteCollectorConfig
 from .quote_exporter import QuoteStaticExporter
 from .storage import MonitorStore
-from .strategy_state import StrategyStateReader
 
 
 DEFAULT_PUBLIC_BASE_URL = "https://mahvro.github.io/fixedstep-monitor"
@@ -32,36 +35,13 @@ def _advance_periodic_deadline(
     return deadline + (missed_intervals + 1) * interval_seconds, True
 
 
-def _common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--database", type=Path, default=Path("data/fixedstep-monitor.sqlite3"))
-    parser.add_argument("--site-root", type=Path, default=Path("docs"))
-    parser.add_argument("--public-base-url", default=DEFAULT_PUBLIC_BASE_URL)
-    parser.add_argument("--source-stale-after", type=int, default=180)
-    parser.add_argument("--public-stale-after", type=int, default=1200)
-    parser.add_argument("--publish-interval", type=int, default=600)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fixedstep-monitor")
-    subparsers = parser.add_subparsers(dest="command")
-
-    collect = subparsers.add_parser("collect", help="collect read-only MT5 data and export static files")
-    _common(collect)
-    collect.add_argument("--loop", action="store_true", help="repeat until stopped")
-    collect.add_argument("--interval", type=int, default=60, choices=range(30, 61))
-    collect.add_argument("--history-days", type=int, default=3650)
-    collect.add_argument("--history-overlap-hours", type=int, default=24)
-    collect.add_argument("--strategy-state", type=Path)
-    collect.add_argument("--initial-capital", type=float)
-    collect.add_argument("--symbol", action="append", dest="symbols")
-    collect.add_argument("--magic", action="append", dest="magic_numbers", type=int, default=[])
-
-    export = subparsers.add_parser("export", help="rebuild static files from stored history")
-    _common(export)
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
     publish = subparsers.add_parser("publish", help="stage generated files; commit/push only when requested")
     publish.add_argument("--repository", type=Path, default=Path.cwd())
-    publish.add_argument("--generated-path", default="docs/ai")
+    publish.add_argument("--generated-path", default="docs/ai", choices=("docs/ai",))
     publish.add_argument("--commit", action="store_true")
     publish.add_argument("--push", action="store_true")
     publish.add_argument("--message", default="Update FixedStep0.5 monitoring snapshot")
@@ -85,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     quote_live.add_argument(
         "--symbol", default="FixedStep0.5", choices=("FixedStep0.5",)
     )
-    quote_live.add_argument("--interval", type=int, default=15, choices=range(15, 61))
+    quote_live.add_argument("--interval", type=int, default=10, choices=range(10, 61))
     quote_live.add_argument("--source-stale-after", type=int, default=45)
     quote_live.add_argument("--publish-interval", type=int, default=600)
     quote_live.add_argument("--api-host", default="127.0.0.1")
@@ -101,32 +81,17 @@ def build_parser() -> argparse.ArgumentParser:
     quote_live.add_argument("--repository", type=Path, default=Path.cwd())
     quote_live.add_argument("--remote", default="origin")
     quote_live.add_argument("--branch", default="live")
-    return parser
-
-
-def _exporter(args: argparse.Namespace, store: MonitorStore) -> StaticExporter:
-    interval = getattr(args, "interval", 60)
-    return StaticExporter(
-        store,
-        args.site_root,
-        source_stale_after_seconds=args.source_stale_after,
-        public_stale_after_seconds=args.public_stale_after,
-        expected_collection_interval_seconds=interval,
-        expected_publish_interval_seconds=args.publish_interval,
-        public_base_url=args.public_base_url,
+    quote_live.add_argument(
+        "--realtime-ingest-url",
+        help="exact HTTPS /v1/ingest endpoint; the bearer token is read only from the process environment",
     )
+    quote_live.add_argument("--realtime-timeout", type=float, default=5.0)
+    return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     arguments = list(argv) if argv is not None else sys.argv[1:]
-    if not arguments or arguments[0] not in {
-        "collect",
-        "export",
-        "publish",
-        "quote-live",
-    }:
-        arguments.insert(0, "collect")
     args = parser.parse_args(arguments)
     command = args.command
 
@@ -137,6 +102,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error("--publish-interval must be at least 600 seconds")
         if args.api_port < 0 or args.api_port > 65535:
             parser.error("--api-port must be between 0 and 65535")
+        if not 0.5 <= args.realtime_timeout <= 10.0:
+            parser.error("--realtime-timeout must be between 0.5 and 10 seconds")
         api_data_dir = args.api_data_dir.resolve()
         static_ai_root = (args.site_root / "ai").resolve()
         try:
@@ -188,6 +155,54 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else None
             )
             publish_worker: CoalescingPublishWorker | None = None
+            realtime_worker: LatestWinsPublishWorker | None = None
+
+            def realtime_complete(
+                result: OutboundPublishResult | None, error: str | None
+            ) -> None:
+                if error is not None:
+                    print(
+                        json.dumps(
+                            {"realtime_publish": "failed", "error": error},
+                            sort_keys=True,
+                        ),
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return
+                print(
+                    json.dumps(
+                        {
+                            "realtime_publish": "completed",
+                            "snapshot_id": result.snapshot_id if result else None,
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+
+            if args.realtime_ingest_url:
+                try:
+                    realtime_publisher = OutboundQuotePublisher.from_environment(
+                        args.realtime_ingest_url,
+                        timeout_seconds=args.realtime_timeout,
+                    )
+                except OutboundPublishError as exc:
+                    # A relay configuration problem must not stop local quote
+                    # collection, SQLite retention, or the static fallback.
+                    print(
+                        json.dumps(
+                            {"realtime_publish": "disabled", "error": str(exc)},
+                            sort_keys=True,
+                        ),
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                else:
+                    realtime_worker = LatestWinsPublishWorker(
+                        realtime_publisher.publish,
+                        on_complete=realtime_complete,
+                    )
 
             def perform_background_refresh() -> PublishResult:
                 staged = False
@@ -300,6 +315,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ),
                     flush=True,
                 )
+                collection = payload.get("collection")
+                if (
+                    realtime_worker is not None
+                    and isinstance(collection, dict)
+                    and collection.get("status") == "live"
+                    and collection.get("connected") is True
+                    and isinstance(payload.get("quote"), dict)
+                ):
+                    # The network request runs only on the latest-wins worker.
+                    # Repeated slow requests replace the pending payload rather
+                    # than blocking collection or creating a catch-up queue.
+                    realtime_worker.request(payload)
                 if args.stop_file and args.stop_file.is_file():
                     stop_event.set()
                     return
@@ -320,7 +347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if not refresh_due:
                     return
                 # Queue only: history SQL/JSON/CSV/SVG work and all Git/network
-                # operations stay off the 15-second collector thread.
+                # operations stay off the frequent collector thread.
                 if not publish_worker.request():
                     print(
                         json.dumps(
@@ -352,6 +379,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     file=sys.stderr if not joined else sys.stdout,
                     flush=True,
                 )
+                if realtime_worker is not None:
+                    realtime_joined = realtime_worker.shutdown(drain=True, timeout=15.0)
+                    realtime_state = realtime_worker.snapshot
+                    print(
+                        json.dumps(
+                            {
+                                "realtime_worker": "stopped"
+                                if realtime_joined
+                                else "still_running",
+                                "requested": realtime_state.requested,
+                                "completed": realtime_state.completed,
+                                "coalesced": realtime_state.coalesced,
+                                "failures": realtime_state.failures,
+                                "last_error": realtime_state.last_error,
+                            },
+                            sort_keys=True,
+                        ),
+                        file=sys.stderr if not realtime_joined else sys.stdout,
+                        flush=True,
+                    )
                 if server is not None:
                     server.shutdown()
         return 0
@@ -376,40 +423,5 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result.__dict__, sort_keys=True))
         return 0
 
-    with MonitorStore(args.database) as store:
-        exporter = _exporter(args, store)
-        if command == "export":
-            latest = exporter.export()
-        else:
-            symbols = tuple(args.symbols or ("FixedStep0.5",))
-            reader = StrategyStateReader(args.strategy_state) if args.strategy_state else None
-            collector = Collector(
-                store,
-                exporter,
-                lambda: ReadOnlyMT5(symbols=symbols, magic_numbers=args.magic_numbers),
-                strategy_reader=reader,
-                config=CollectorConfig(
-                    interval_seconds=args.interval,
-                    initial_history_days=args.history_days,
-                    history_overlap_hours=args.history_overlap_hours,
-                    initial_capital=args.initial_capital,
-                ),
-            )
-            if args.loop:
-                try:
-                    collector.run_forever()
-                except KeyboardInterrupt:
-                    return 0
-                return 0
-            latest = collector.run_once()
-    print(
-        json.dumps(
-            {
-                "status": latest["collection"]["status"],
-                "generated_at": latest["generated_at"],
-                "snapshot_id": latest["snapshot_id"],
-            },
-            sort_keys=True,
-        )
-    )
-    return 0
+    parser.error("unsupported command")
+    return 2

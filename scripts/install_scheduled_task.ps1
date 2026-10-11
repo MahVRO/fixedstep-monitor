@@ -7,8 +7,8 @@ param(
     [string]$DatabasePath,
     [string]$SiteRoot,
     [string]$ApiDataDir,
-    [ValidateRange(15, 60)]
-    [int]$IntervalSeconds = 15,
+    [ValidateRange(10, 60)]
+    [int]$IntervalSeconds = 10,
     [ValidateRange(600, 86400)]
     [int]$PublishIntervalSeconds = 600,
     [ValidateSet('FixedStep0.5')]
@@ -20,7 +20,11 @@ param(
     [string]$AllowedOrigin = 'https://mahvro.github.io',
     [switch]$EnableGitPublish,
     [string]$GitRemote = 'origin',
-    [string]$GitBranch = 'live'
+    [string]$GitBranch = 'live',
+    [string]$RealtimeIngestUrl,
+    [string]$RealtimeTokenPath,
+    [ValidateRange(1, 10)]
+    [int]$RealtimeTimeoutSeconds = 5
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,6 +58,25 @@ if ($EnableGitPublish) {
         throw "Git publication requires the '$GitBranch' snapshot branch to be checked out."
     }
 }
+if ($RealtimeIngestUrl) {
+    if ($IntervalSeconds -ne 10) {
+        throw 'Realtime publication requires IntervalSeconds 10.'
+    }
+    if (-not $RealtimeTokenPath -or
+        -not (Test-Path -LiteralPath $RealtimeTokenPath -PathType Leaf)) {
+        throw 'Realtime publication requires an existing DPAPI-protected token file.'
+    }
+    $realtimeUri = $null
+    if (-not [Uri]::TryCreate($RealtimeIngestUrl, [UriKind]::Absolute, [ref]$realtimeUri) -or
+        $realtimeUri.Scheme -ne 'https' -or
+        [string]::IsNullOrWhiteSpace($realtimeUri.Host) -or
+        $realtimeUri.UserInfo -or
+        $realtimeUri.AbsolutePath -ne '/v1/ingest' -or
+        $realtimeUri.Query -or
+        $realtimeUri.Fragment) {
+        throw 'Realtime publication requires an exact HTTPS /v1/ingest URL without credentials, query, or fragment.'
+    }
+}
 
 function Quote-TaskArgument([string]$Value) {
     return '"' + $Value.Replace('"', '\"') + '"'
@@ -80,6 +103,13 @@ if ($EnableGitPublish) {
         '-EnableGitPublish',
         '-GitRemote', (Quote-TaskArgument $GitRemote),
         '-GitBranch', (Quote-TaskArgument $GitBranch)
+    )
+}
+if ($RealtimeIngestUrl) {
+    $arguments += @(
+        '-RealtimeIngestUrl', (Quote-TaskArgument $RealtimeIngestUrl),
+        '-RealtimeTokenPath', (Quote-TaskArgument $RealtimeTokenPath),
+        '-RealtimeTimeoutSeconds', $RealtimeTimeoutSeconds
     )
 }
 
@@ -111,6 +141,7 @@ $registered = Get-ScheduledTask -TaskName $TaskName
     IntervalSeconds = $IntervalSeconds
     PublishEnabled = $EnableGitPublish.IsPresent
     PublishIntervalSeconds = $PublishIntervalSeconds
+    RealtimePublishEnabled = [bool]$RealtimeIngestUrl
     DatabasePath = $DatabasePath
     ApiDataDir = $ApiDataDir
     ApiEndpoint = "http://${ApiHost}:${ApiPort}/v1/latest"

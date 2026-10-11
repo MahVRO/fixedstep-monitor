@@ -7,7 +7,7 @@ A quote-only, read-only MT5 monitor and chart for the exact `FixedStep0.5` symbo
 - Static quote JSON: <https://mahvro.github.io/fixedstep-monitor/ai/data/quotes.json>
 - Dataset manifest: <https://mahvro.github.io/fixedstep-monitor/ai/manifest.json>
 
-The active runtime samples the latest MT5 bid and ask every 15 seconds. It does not read or publish account state, P&L, positions, orders, deals, strategy state, or broker identity. Missing values remain `null` or unavailable; they are never replaced with zero.
+The active runtime samples the latest MT5 bid and ask every 10 seconds. It does not read or publish account state, P&L, positions, orders, deals, strategy state, or broker identity. Missing values remain `null` or unavailable; they are never replaced with zero.
 
 ## Safety boundary
 
@@ -23,11 +23,14 @@ There is no account call and no trading action. The exact symbol is checked rath
 
 ```text
 Existing authenticated MT5 terminal
-              │ quote-only reads every 15s
+              │ quote-only reads every 10s
               ▼
 Local SQLite quote history (WAL, deduplicated by broker tick)
               ├────────► runtime/quote-api/latest.json
-              │          └─► loopback /v1/latest (live data)
+              │          ├─► loopback /v1/latest (local diagnostics)
+              │          └─► latest-wins HTTPS publisher
+              │                    └─► Cloudflare Worker + D1
+              │                           └─► public /v1/latest + /v1/quotes
               │
               └────────► background static worker
                          ├─► docs/ai/data/quotes.json
@@ -38,7 +41,7 @@ Local SQLite quote history (WAL, deduplicated by broker tick)
 GitHub Pages
 ```
 
-The loopback API may be exposed by a separately configured, narrowly scoped HTTPS proxy. `/v1/latest` serves the dedicated runtime snapshot and `/v1/quotes` serves the bounded static history file by exact configured paths. It does not perform a generic file lookup and does not expose SQLite, logs, source files, MT5, or an action endpoint.
+The dashboard polls the public Worker every 10 seconds. The MINIPC initiates only outbound HTTPS requests, so neither the loopback API nor any other MINIPC service needs public inbound access. `/v1/latest` serves request-time freshness and `/v1/quotes` serves recent quote history. The static GitHub Pages bundle remains an independent 600-second fallback.
 
 ## Public contract
 
@@ -62,11 +65,11 @@ Static endpoints:
 - `/ai/charts/fixedstep-spread.svg`
 - `/ai/manifest.json`
 
-The live `runtime/quote-api/latest.json` is deliberately small and carries no history rows, so the 15-second poll does not repeatedly download the chart history. That fast path performs only constant-size database lookups and one atomic file replacement. The static `docs/ai/data/latest.json` is part of the coherent fallback bundle and therefore refreshes on the static cadence. `quotes.json` carries the bounded history and is capped at 18,000 rows and 3.5 MB, below the live API's 4 MiB response limit.
+The live `runtime/quote-api/latest.json` is deliberately small and carries no history rows, so the 10-second cycle does not repeatedly render the chart history. That fast path performs only constant-size database lookups and one atomic file replacement. The static `docs/ai/data/latest.json` is part of the coherent fallback bundle and therefore refreshes on the static cadence. `quotes.json` carries the bounded history and is capped at 18,000 rows and 3.5 MB, below the local API's 4 MiB response limit.
 
 The local SQLite database retains every distinct sampled broker tick. Every 600 seconds, a background worker asks SQLite for only the rows needed publicly: full source cadence for 24 hours, the last observed tick per collector first-observation host-clock minute through day 7, and the last observed tick per collector first-observation host-clock hour through day 90. Older observations remain local-only. No missing interval is interpolated. The raw MT5 clock remains available for audit but does not choose the rows.
 
-History selection, JSON/CSV/SVG rendering, local Git staging and any network push all run outside the 15-second collector thread. One worker permits only one active job and one coalesced trailing job. The worker exclusively owns `docs/ai`; the collector exclusively owns `runtime/quote-api/latest.json`. There is no lock shared between them, so a blocked render, Git stage, commit, or push cannot delay the live snapshot or replace it with an older quote.
+History selection, JSON/CSV/SVG rendering, local Git staging, outbound relay requests and any network push all run outside the 10-second collector thread. Each publisher permits only one active job and one replaceable/coalesced trailing job. The static worker exclusively owns `docs/ai`; the collector exclusively owns `runtime/quote-api/latest.json`. There is no lock shared between them, so a blocked render, Git stage, request, commit, or push cannot delay the live snapshot or replace it with an older quote.
 
 ## Local validation
 
@@ -84,11 +87,13 @@ Run the quote runtime locally:
   --database runtime\fixedstep-quotes.sqlite3 `
   --site-root docs `
   --symbol FixedStep0.5 `
-  --interval 15 `
+  --interval 10 `
   --api-data-dir runtime\quote-api `
   --api-host 127.0.0.1 `
   --api-port 8765
 ```
+
+For the public real-time path, add the exact Worker `/v1/ingest` URL and provide `FIXEDSTEP_REALTIME_TOKEN` only in the child process environment. On the deployed Windows task the token is stored as a current-user DPAPI blob outside the repository and the task definition contains only its path.
 
 The live snapshot is then available at `http://127.0.0.1:8765/v1/latest`; bounded chart history is at `http://127.0.0.1:8765/v1/quotes`. Git publication remains opt-in and is bounded to one fallback attempt every 600 seconds or slower. On startup, local files are seeded first; after the first MT5 collection attempt, the background worker rebuilds the first publishable fallback so a real quote is included when available.
 

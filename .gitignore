@@ -12,6 +12,9 @@ runtime/
 private/
 secrets/
 backups/
+.wrangler/
+.dev.vars
+.dev.vars.*
 
 # Local configuration may contain machine paths or private selectors
 config.json

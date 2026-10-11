@@ -10,8 +10,8 @@ param(
     [string]$SiteRoot,
     [Parameter(Mandatory = $true)]
     [string]$ApiDataDir,
-    [ValidateRange(15, 60)]
-    [int]$IntervalSeconds = 15,
+    [ValidateRange(10, 60)]
+    [int]$IntervalSeconds = 10,
     [ValidateRange(600, 86400)]
     [int]$PublishIntervalSeconds = 600,
     [ValidateRange(1, 600)]
@@ -25,7 +25,11 @@ param(
     [string]$AllowedOrigin = 'https://mahvro.github.io',
     [switch]$EnableGitPublish,
     [string]$GitRemote = 'origin',
-    [string]$GitBranch = 'live'
+    [string]$GitBranch = 'live',
+    [string]$RealtimeIngestUrl,
+    [string]$RealtimeTokenPath,
+    [ValidateRange(1, 10)]
+    [int]$RealtimeTimeoutSeconds = 5
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,10 +119,47 @@ if ($EnableGitPublish) {
     $arguments += '--enable-git-publish'
 }
 
+$realtimeToken = $null
+$realtimeBstr = [IntPtr]::Zero
+if ($RealtimeIngestUrl) {
+    try {
+        if ($IntervalSeconds -ne 10) {
+            throw 'unsupported realtime interval'
+        }
+        if (-not $RealtimeTokenPath -or
+            -not (Test-Path -LiteralPath $RealtimeTokenPath -PathType Leaf)) {
+            throw 'missing protected token'
+        }
+        $protectedToken = Get-Content -LiteralPath $RealtimeTokenPath -Raw -ErrorAction Stop
+        $secureToken = ConvertTo-SecureString -String $protectedToken -ErrorAction Stop
+        $realtimeBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+        $realtimeToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($realtimeBstr)
+        if ($realtimeToken.Length -lt 32 -or
+            $realtimeToken.Length -gt 256 -or
+            $realtimeToken -notmatch '^[\x21-\x7E]+$') {
+            throw 'invalid protected token'
+        }
+        $arguments += @(
+            '--realtime-ingest-url', $RealtimeIngestUrl,
+            '--realtime-timeout', [string]$RealtimeTimeoutSeconds
+        )
+    }
+    catch {
+        # A relay credential problem must not stop local quote collection or
+        # the static GitHub fallback. Never log the path or exception text.
+        $realtimeToken = $null
+        Write-MonitorLog 'WARN' 'realtime_publish_disabled category=ProtectedTokenUnavailable'
+    }
+}
+
 Write-MonitorLog 'INFO' "quote_monitor_started collection_interval=$IntervalSeconds publish_enabled=$($EnableGitPublish.IsPresent)"
 $priorGitTimeout = $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS
+$priorRealtimeToken = $env:FIXEDSTEP_REALTIME_TOKEN
 $priorErrorActionPreference = $ErrorActionPreference
 $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS = [string]$GitTimeoutSeconds
+if ($realtimeToken) {
+    $env:FIXEDSTEP_REALTIME_TOKEN = $realtimeToken
+}
 try {
     # Windows PowerShell converts native stderr into ErrorRecord objects. With
     # Stop semantics, one harmless MT5 diagnostic would terminate the wrapper
@@ -146,6 +187,11 @@ catch {
 finally {
     $ErrorActionPreference = $priorErrorActionPreference
     $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS = $priorGitTimeout
+    $env:FIXEDSTEP_REALTIME_TOKEN = $priorRealtimeToken
+    if ($realtimeBstr -ne [IntPtr]::Zero) {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($realtimeBstr)
+    }
+    $realtimeToken = $null
 }
 Write-MonitorLog 'INFO' "quote_monitor_exited code=$exitCode"
 exit $exitCode

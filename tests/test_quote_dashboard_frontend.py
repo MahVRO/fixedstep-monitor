@@ -13,6 +13,7 @@ class QuoteDashboardFrontendTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.html = (DASHBOARD / "index.html").read_text(encoding="utf-8")
         cls.javascript = (DASHBOARD / "app.js").read_text(encoding="utf-8")
+        cls.runtime_config = (DASHBOARD / "runtime-config.js").read_text(encoding="utf-8")
         cls.styles = (DASHBOARD / "app.css").read_text(encoding="utf-8")
 
     def test_dashboard_is_quote_only(self) -> None:
@@ -38,14 +39,36 @@ class QuoteDashboardFrontendTests(unittest.TestCase):
             self.assertNotIn(removed, self.html)
 
     def test_live_poll_and_static_fallback_are_explicit(self) -> None:
-        self.assertIn('const POLL_MS = 15_000;', self.javascript)
+        self.assertIn('const POLL_MS = 10_000;', self.javascript)
         self.assertIn('const REQUEST_TIMEOUT_MS = 8_000;', self.javascript)
-        self.assertIn('`${LIVE_ORIGIN}/v1/quotes`', self.javascript)
-        self.assertIn('`${LIVE_ORIGIN}/v1/latest`', self.javascript)
+        self.assertIn('LIVE_ORIGIN ? `${LIVE_ORIGIN}/v1/quotes` : null', self.javascript)
+        self.assertIn('LIVE_ORIGIN ? `${LIVE_ORIGIN}/v1/latest` : null', self.javascript)
         self.assertIn('const STATIC_HISTORY_URL = "../ai/data/quotes.json";', self.javascript)
         self.assertIn('cache: "no-store"', self.javascript)
         self.assertIn('credentials: "omit"', self.javascript)
+        self.assertIn('fetchJson(STATIC_HISTORY_URL, { cacheBust: true })', self.javascript)
+        self.assertIn('const requestUrl = cacheBust', self.javascript)
+        self.assertNotIn('fetch(`${url}${separator}v=', self.javascript)
         self.assertIn("incomingCollected > currentCollected", self.javascript)
+        self.assertIn("incomingRelayReceived > currentRelayReceived", self.javascript)
+        self.assertIn('validatedTimestamp(payload.relay.received_at, "relay.received_at")', self.javascript)
+        self.assertIn('source === "live" && normalized.relay !== null', self.javascript)
+        self.assertIn("await fetchStaticFallback();", self.javascript)
+        self.assertLess(
+            self.javascript.index("await fetchStaticFallback();", self.javascript.index("async function bootstrap")),
+            self.javascript.index("fetchJson(LIVE_HISTORY_URL)", self.javascript.index("async function bootstrap")),
+        )
+
+    def test_runtime_origin_is_externalized_and_strictly_validated(self) -> None:
+        self.assertIn("liveOrigin:", self.runtime_config)
+        self.assertNotIn("minipc-7znlk", self.html + self.javascript + self.runtime_config)
+        self.assertIn('src="runtime-config.js"', self.html)
+        self.assertLess(self.html.index('src="runtime-config.js"'), self.html.index('src="app.js"'))
+        self.assertIn('parsed.protocol !== "https:"', self.javascript)
+        self.assertIn('parsed.username !== ""', self.javascript)
+        self.assertIn('parsed.password !== ""', self.javascript)
+        self.assertIn('!parsed.hostname.endsWith(".workers.dev")', self.javascript)
+        self.assertIn('connect-src \'self\' https://*.workers.dev', self.html)
 
     def test_contract_and_clock_safe_freshness_are_validated(self) -> None:
         self.assertIn('const SYMBOL = "FixedStep0.5";', self.javascript)

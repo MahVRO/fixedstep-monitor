@@ -23,7 +23,7 @@ $env:PYTHONPATH = 'src'
 
 .\scripts\install_scheduled_task.ps1 `
   -ProjectRoot $PWD.Path `
-  -IntervalSeconds 15 `
+  -IntervalSeconds 10 `
   -PublishIntervalSeconds 600 `
   -Symbol FixedStep0.5
 
@@ -43,7 +43,7 @@ Confirm that:
 
 1. `schema_version` is `fixedstep-quotes-v1`.
 2. `symbol` is exactly `FixedStep0.5`.
-3. `collection.collected_at` and the snapshot ID advance about every 15 seconds, while `collection.collection_age_seconds` remains below the configured stale threshold.
+3. `collection.collected_at` and the snapshot ID advance about every 10 seconds, while `collection.collection_age_seconds` remains below the configured stale threshold.
 4. `collector_clock_basis` is `utc_serialized_host_clock_synchronization_not_asserted`, and `chart_time_basis` is `collector_first_observation_host_clock`.
 5. `quote.tick_at` is preserved separately with `tick_time_basis: mt5_reported_unverified`; a material `mt5_reported_offset_seconds` is reported as a clock diagnostic, never as tick freshness.
 6. bid and ask match MT5, ask is not below bid, and broker `last=0.0` appears publicly as `null`.
@@ -74,13 +74,36 @@ git push --dry-run origin HEAD:live
 .\scripts\install_scheduled_task.ps1 `
   -ProjectRoot $PWD.Path `
   -PythonExe 'C:\path\to\python.exe' `
-  -IntervalSeconds 15 `
+  -IntervalSeconds 10 `
   -PublishIntervalSeconds 600 `
   -Symbol FixedStep0.5 `
   -EnableGitPublish
 ```
 
-`runtime\quote-api\latest.json` and the live `/v1/latest` response update every 15 seconds. Bounded history JSON/CSV, the static `docs\ai\data\latest.json`, static SVGs, the no-JS page, and the manifest rebuild in one background worker after the first collection and then every 600 seconds. That worker owns the entire `docs\ai` bundle and all Git activity; it never writes the runtime live file. Slow rendering, Git staging, commit, or network work therefore cannot pause or regress `/v1/latest`; repeated static triggers coalesce rather than overlap. Pages build and cache propagation add variable delay and are not represented as 15-second public freshness.
+`runtime\quote-api\latest.json` and the local `/v1/latest` response update every 10 seconds. Bounded history JSON/CSV, the static `docs\ai\data\latest.json`, static SVGs, the no-JS page, and the manifest rebuild in one background worker after the first collection and then every 600 seconds. That worker owns the entire `docs\ai` bundle and all Git activity; it never writes the runtime live file. Slow rendering, Git staging, commit, or network work therefore cannot pause or regress `/v1/latest`; repeated static triggers coalesce rather than overlap. Pages build and cache propagation add variable delay and are not represented as 10-second public freshness.
+
+## Enable the outbound real-time relay
+
+Provision the Worker and D1 database from `cloudflare\worker` as described in its README. Store the ingest token outside the checkout using Windows DPAPI, then reinstall the same task:
+
+```powershell
+$secret = Read-Host 'Relay token' -AsSecureString
+.\scripts\save_realtime_secret.ps1 `
+  -Secret $secret `
+  -Destination "$env:LOCALAPPDATA\FixedStepMonitor\realtime-token.dpapi"
+
+.\scripts\install_scheduled_task.ps1 `
+  -ProjectRoot $PWD.Path `
+  -PythonExe 'C:\path\to\python.exe' `
+  -IntervalSeconds 10 `
+  -PublishIntervalSeconds 600 `
+  -Symbol FixedStep0.5 `
+  -EnableGitPublish `
+  -RealtimeIngestUrl 'https://WORKER.workers.dev/v1/ingest' `
+  -RealtimeTokenPath "$env:LOCALAPPDATA\FixedStepMonitor\realtime-token.dpapi"
+```
+
+The task definition contains the Worker URL and protected-file path, never the token. A slow or failed relay request is isolated on a latest-wins worker: local SQLite, the loopback snapshot and the 600-second GitHub fallback continue. When collection stops or disconnects, no old quote is re-posted; the Worker ages its last receipt to `stale`.
 
 The background history query performs the 24-hour/full, 7-day/minute, and 90-day/hour selection against collector first-observation host time in SQLite before JSON decoding. Raw MT5 time is not used for those boundaries or buckets. The full retained-row count is a separate `COUNT(*)`; old local rows are not loaded merely to generate public files.
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#080d14">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://minipc-7znlk.tailacf300.ts.net:8443; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://*.workers.dev; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'">
   <title>FixedStep0.5 live chart</title>
   <link rel="stylesheet" href="app.css">
 </head>
@@ -159,6 +159,7 @@
   </main>
 
   <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+  <script src="runtime-config.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

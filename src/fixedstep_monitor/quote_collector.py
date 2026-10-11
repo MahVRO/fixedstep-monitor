@@ -23,11 +23,11 @@ class QuoteSource(Protocol):
 
 @dataclass(frozen=True)
 class QuoteCollectorConfig:
-    interval_seconds: int = 15
+    interval_seconds: int = 10
 
     def __post_init__(self) -> None:
-        if not 15 <= self.interval_seconds <= 60:
-            raise ValueError("interval_seconds must be between 15 and 60")
+        if not 10 <= self.interval_seconds <= 60:
+            raise ValueError("interval_seconds must be between 10 and 60")
 
 
 class QuoteCollector:

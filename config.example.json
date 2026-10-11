@@ -2,7 +2,7 @@
   "schema_version": 2,
   "note": "Reference values for the quote-only runtime; pass them through the CLI or scheduled-task installer.",
   "symbol": "FixedStep0.5",
-  "collection_interval_seconds": 15,
+  "collection_interval_seconds": 10,
   "source_stale_after_seconds": 45,
   "static_publication_interval_seconds": 600,
   "database_path": "runtime/fixedstep-quotes.sqlite3",
@@ -20,5 +20,12 @@
     "remote": "origin",
     "branch": "live",
     "minimum_interval_seconds": 600
+  },
+  "realtime_outbound_publish": {
+    "enabled": false,
+    "ingest_url": "https://YOUR-WORKER.workers.dev/v1/ingest",
+    "protected_token_path": "C:\\Users\\CURRENT_USER\\AppData\\Local\\FixedStepMonitor\\realtime-token.dpapi",
+    "request_timeout_seconds": 5,
+    "note": "The token is DPAPI-protected outside the repository and is never stored in this file."
   }
 }

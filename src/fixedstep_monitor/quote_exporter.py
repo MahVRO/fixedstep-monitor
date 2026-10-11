@@ -137,7 +137,7 @@ def compact_quote_history(
 ) -> list[dict[str, Any]]:
     """Bound public history without interpolating or altering local samples.
 
-    The latest 24 hours remain at the 15-second source cadence. Days 2-7 keep
+    The latest 24 hours remain at the configured source cadence. Days 2-7 keep
     the last first-observed tick in each collector-host-clock minute, and days
     8-90 keep the last first-observed tick in each collector-host-clock hour.
     Raw MT5 time never controls retention, bucketing, or ordering. The host
@@ -183,7 +183,7 @@ class QuoteStaticExporter:
         *,
         symbol: str = "FixedStep0.5",
         source_stale_after_seconds: int = 45,
-        expected_collection_interval_seconds: int = 15,
+        expected_collection_interval_seconds: int = 10,
         expected_publish_interval_seconds: int = 600,
         public_base_url: str = "https://mahvro.github.io/fixedstep-monitor",
         clock=utc_now,
@@ -254,7 +254,8 @@ class QuoteStaticExporter:
             "maximum_public_samples": MAX_PUBLIC_SAMPLES,
             "maximum_public_json_bytes": MAX_PUBLIC_JSON_BYTES,
             "sampling_policy": (
-                "15-second source samples for the latest 24 hours; last observed sample "
+                f"{self.expected_collection_interval_seconds}-second source samples for "
+                "the latest 24 hours; last observed sample "
                 "per collector first-observation host-clock minute through day 7; last "
                 "observed sample per collector first-observation host-clock hour through "
                 "day 90; older samples are not "
@@ -363,7 +364,7 @@ class QuoteStaticExporter:
     def export_latest(self) -> dict[str, Any]:
         """Atomically refresh only the small live quote payload.
 
-        This is the 15-second path.  It performs constant-size lookups and does
+        This is the frequent collection path. It performs constant-size lookups and does
         not read quote history or rewrite CSV, charts, manifest, or the AI page.
         Coverage describes the most recently rebuilt static history bundle.
         """
@@ -589,7 +590,7 @@ class QuoteStaticExporter:
         # All expensive selection, validation, serialization, and chart work
         # occurs before this static-bundle lock.  The live API file has a
         # separate owner and path, so neither rendering nor optional Git
-        # staging can delay or overwrite the 15-second live snapshot.
+        # staging can delay or overwrite the frequent live snapshot.
         with self.write_lock:
             self._remove_legacy_public_files()
             _atomic_write(data_dir / "latest.json", latest_text)
@@ -599,7 +600,7 @@ class QuoteStaticExporter:
                 _atomic_write(charts_dir / filename, content)
             _atomic_write(self.site_root / "ai" / "manifest.json", manifest_text)
             _atomic_write(self.site_root / "ai" / "index.html", ai_html)
-            # Persist only the small public-history summary. The 15-second path
+            # Persist only the small public-history summary. The collection path
             # reads this metadata instead of scanning or decoding history.
             self.store.set_metadata(COVERAGE_METADATA_KEY, coverage)
             if after_write is not None:

@@ -1,0 +1,13 @@
+name = "fixedstep-quote-relay"
+main = "src/index.js"
+compatibility_date = "2026-10-11"
+workers_dev = true
+
+[[d1_databases]]
+binding = "QUOTES_DB"
+database_name = "fixedstep-quotes"
+database_id = "2669b047-2f33-422f-a91f-5e1e3cfadb88"
+preview_database_id = "2669b047-2f33-422f-a91f-5e1e3cfadb88"
+migrations_dir = "migrations"
+
+# INGEST_TOKEN is a Wrangler secret. Never add it to this file.

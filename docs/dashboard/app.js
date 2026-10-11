@@ -2,13 +2,38 @@
 
 const SYMBOL = "FixedStep0.5";
 const SCHEMA_VERSION = "fixedstep-quotes-v1";
-const LIVE_ORIGIN = "https://minipc-7znlk.tailacf300.ts.net:8443";
-const LIVE_HISTORY_URL = `${LIVE_ORIGIN}/v1/quotes`;
-const LIVE_LATEST_URL = `${LIVE_ORIGIN}/v1/latest`;
+
+function validatedLiveOrigin(rawOrigin) {
+  if (rawOrigin === null || rawOrigin === undefined || rawOrigin === "") return null;
+  if (typeof rawOrigin !== "string" || rawOrigin !== rawOrigin.trim()) return null;
+  try {
+    const parsed = new URL(rawOrigin);
+    if (
+      parsed.protocol !== "https:"
+      || parsed.username !== ""
+      || parsed.password !== ""
+      || (parsed.pathname !== "" && parsed.pathname !== "/")
+      || parsed.search !== ""
+      || parsed.hash !== ""
+      || parsed.port !== ""
+      || parsed.hostname === ""
+      || !parsed.hostname.endsWith(".workers.dev")
+    ) return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+const RUNTIME_CONFIG = window.FIXEDSTEP_MONITOR_CONFIG;
+const LIVE_ORIGIN = validatedLiveOrigin(RUNTIME_CONFIG?.liveOrigin);
+const LIVE_HISTORY_URL = LIVE_ORIGIN ? `${LIVE_ORIGIN}/v1/quotes` : null;
+const LIVE_LATEST_URL = LIVE_ORIGIN ? `${LIVE_ORIGIN}/v1/latest` : null;
 const STATIC_HISTORY_URL = "../ai/data/quotes.json";
-const POLL_MS = 15_000;
+const POLL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 8_000;
 const HISTORY_REFRESH_MS = 5 * 60_000;
+const STATIC_REFRESH_MS = 10 * 60_000;
 const STATIC_RETRY_MS = 60_000;
 const DEFAULT_STALE_SECONDS = 45;
 const MATERIAL_CLOCK_OFFSET_SECONDS = 300;
@@ -24,6 +49,7 @@ const state = {
   transportError: false,
   latestPollRunning: false,
   fullRefreshRunning: false,
+  staticRefreshRunning: false,
   lastStaticAttemptAt: 0,
   latestReceiptMonotonicMs: null,
 };
@@ -231,6 +257,24 @@ function normalizePayload(payload) {
     throw new Error("chart_time_basis is unsupported");
   }
   const snapshotId = typeof payload.snapshot_id === "string" ? payload.snapshot_id : null;
+  let relay = null;
+  if (payload.relay !== null && payload.relay !== undefined) {
+    if (typeof payload.relay !== "object" || Array.isArray(payload.relay)) {
+      throw new Error("relay must be an object");
+    }
+    const relayReceived = validatedTimestamp(payload.relay.received_at, "relay.received_at");
+    if (
+      relayReceived.milliseconds === null
+      || payload.relay.freshness_basis !== "incoming_same_host_age_plus_worker_elapsed_time"
+    ) {
+      throw new Error("relay freshness metadata is invalid");
+    }
+    relay = {
+      received_at: relayReceived.text,
+      _received_ms: relayReceived.milliseconds,
+      freshness_basis: payload.relay.freshness_basis,
+    };
+  }
 
   const quoteContext = {
     digits: payload.quote?.digits ?? null,
@@ -257,6 +301,7 @@ function normalizePayload(payload) {
     tick_time_basis: tickTimeBasis,
     collector_clock_basis: collectorClockBasis,
     chart_time_basis: chartTimeBasis,
+    relay,
     collection: {
       status,
       connected,
@@ -318,19 +363,19 @@ function adoptPayload(normalized, source) {
   const currentCollected = state.latest?.collection?._collected_ms ?? state.latest?.quote?._collected_ms ?? -Infinity;
   const incomingGenerated = normalized._generated_ms ?? -Infinity;
   const currentGenerated = state.latest?._generated_ms ?? -Infinity;
-  const mayReplaceLatest = source !== "history" || !state.latest;
-  const shouldAdopt = mayReplaceLatest && (
+  const incomingRelayReceived = normalized.relay?._received_ms ?? -Infinity;
+  const currentRelayReceived = state.latest?.relay?._received_ms ?? -Infinity;
+  const liveCanReplace = source === "live" && normalized.relay !== null && (
+    state.latestSource !== "live"
+    || incomingRelayReceived > currentRelayReceived
+    || (incomingRelayReceived === currentRelayReceived && incomingGenerated >= currentGenerated)
+  );
+  const nonLiveCanReplace = source !== "live" && source !== "history" && (
     !state.latest
     || incomingCollected > currentCollected
     || (incomingCollected === currentCollected && incomingGenerated > currentGenerated)
-    || (
-      incomingCollected === currentCollected
-      && incomingGenerated === currentGenerated
-      && normalized.snapshot_id !== state.latest?.snapshot_id
-      && source === "live"
-    )
-    || (incomingCollected === currentCollected && source === "live" && state.latestSource !== "live")
   );
+  const shouldAdopt = !state.latest || liveCanReplace || nonLiveCanReplace;
 
   if (shouldAdopt) {
     state.latest = { ...normalized, quote: incomingQuote };
@@ -340,12 +385,14 @@ function adoptPayload(normalized, source) {
   }
 }
 
-async function fetchJson(url) {
+async function fetchJson(url, { cacheBust = false } = {}) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const separator = url.includes("?") ? "&" : "?";
-    const response = await fetch(`${url}${separator}v=${Date.now()}`, {
+    const requestUrl = cacheBust
+      ? `${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`
+      : url;
+    const response = await fetch(requestUrl, {
       cache: "no-store",
       credentials: "omit",
       mode: "cors",
@@ -364,7 +411,7 @@ async function fetchJson(url) {
 async function fetchStaticFallback() {
   state.lastStaticAttemptAt = Date.now();
   try {
-    const normalized = await fetchJson(STATIC_HISTORY_URL);
+    const normalized = await fetchJson(STATIC_HISTORY_URL, { cacheBust: true });
     adoptPayload(normalized, "static");
     return true;
   } catch {
@@ -374,33 +421,36 @@ async function fetchStaticFallback() {
 
 async function bootstrap() {
   state.fullRefreshRunning = true;
-  let historyLoaded = false;
-  try {
-    const normalized = await fetchJson(LIVE_HISTORY_URL);
-    adoptPayload(normalized, "history");
-    historyLoaded = true;
-  } catch {
-    await fetchStaticFallback();
-  }
-  try {
-    const normalized = await fetchJson(LIVE_LATEST_URL);
-    state.liveTransportOk = true;
-    state.transportError = false;
-    adoptPayload(normalized, "live");
-  } catch {
-    state.liveTransportOk = false;
-    state.transportError = true;
-    if (!historyLoaded && Date.now() - state.lastStaticAttemptAt >= STATIC_RETRY_MS) {
-      await fetchStaticFallback();
+  await fetchStaticFallback();
+  if (LIVE_HISTORY_URL) {
+    try {
+      const normalized = await fetchJson(LIVE_HISTORY_URL);
+      adoptPayload(normalized, "history");
+    } catch {
+      state.transportError = true;
     }
-  } finally {
-    state.fullRefreshRunning = false;
-    render();
   }
+  if (LIVE_LATEST_URL) {
+    try {
+      const normalized = await fetchJson(LIVE_LATEST_URL);
+      state.liveTransportOk = true;
+      state.transportError = false;
+      adoptPayload(normalized, "live");
+    } catch {
+      state.liveTransportOk = false;
+      state.transportError = true;
+    }
+  }
+  state.fullRefreshRunning = false;
+  render();
 }
 
 async function pollLatest() {
   if (state.latestPollRunning) return;
+  if (!LIVE_LATEST_URL) {
+    if (Date.now() - state.lastStaticAttemptAt >= STATIC_RETRY_MS) await refreshStaticHistory();
+    return;
+  }
   state.latestPollRunning = true;
   try {
     const normalized = await fetchJson(LIVE_LATEST_URL);
@@ -418,7 +468,7 @@ async function pollLatest() {
 }
 
 async function refreshFullHistory() {
-  if (state.fullRefreshRunning) return;
+  if (state.fullRefreshRunning || !LIVE_HISTORY_URL) return;
   state.fullRefreshRunning = true;
   try {
     const normalized = await fetchJson(LIVE_HISTORY_URL);
@@ -427,6 +477,17 @@ async function refreshFullHistory() {
     await fetchStaticFallback();
   } finally {
     state.fullRefreshRunning = false;
+    render();
+  }
+}
+
+async function refreshStaticHistory() {
+  if (state.staticRefreshRunning) return;
+  state.staticRefreshRunning = true;
+  try {
+    await fetchStaticFallback();
+  } finally {
+    state.staticRefreshRunning = false;
     render();
   }
 }
@@ -614,10 +675,14 @@ function renderFreshness() {
   }
 
   const transport = el("transport-state");
-  if (state.liveTransportOk === true) {
+  if (!LIVE_ORIGIN && state.latest) {
+    transport.textContent = "Static publication";
+    setTone(transport, "warning");
+    el("transport-detail").textContent = "Real-time relay not configured";
+  } else if (state.liveTransportOk === true) {
     transport.textContent = "Live endpoint";
     setTone(transport, "positive");
-    el("transport-detail").textContent = "15-second polling active";
+    el("transport-detail").textContent = "10-second polling active";
   } else if (state.latestSource === "static") {
     transport.textContent = "Static fallback";
     setTone(transport, "warning");
@@ -968,6 +1033,7 @@ window.setInterval(() => {
   if (!document.hidden) pollLatest();
 }, POLL_MS);
 window.setInterval(refreshFullHistory, HISTORY_REFRESH_MS);
+window.setInterval(refreshStaticHistory, STATIC_REFRESH_MS);
 window.setInterval(() => {
   if (state.latest) renderFreshness();
 }, 1_000);

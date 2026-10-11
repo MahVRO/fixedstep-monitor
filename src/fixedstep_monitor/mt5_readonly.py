@@ -23,7 +23,7 @@ READ_METHODS = frozenset(
 
 # The quote monitor intentionally has a smaller surface than the legacy account
 # monitor.  Keep this allowlist separate so adding an information call to the
-# legacy adapter cannot silently broaden the process that runs every 15 seconds.
+# legacy adapter cannot silently broaden the frequent quote-collection process.
 QUOTE_READ_METHODS = frozenset(
     {
         "initialize",
