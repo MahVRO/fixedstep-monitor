@@ -1,8 +1,31 @@
 from __future__ import annotations
 
+import math
+import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+
+DEFAULT_GIT_TIMEOUT_SECONDS = 120.0
+MAX_GIT_TIMEOUT_SECONDS = 3600.0
+GIT_TIMEOUT_ENVIRONMENT_VARIABLE = "FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS"
+MAX_GIT_ERROR_CHARACTERS = 512
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_URL_CREDENTIALS = re.compile(
+    r"(?P<scheme>[a-z][a-z0-9+.-]*://)(?:[^/@\s]+@)", re.IGNORECASE
+)
+_SECRET_VALUE = re.compile(
+    r"(?:\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}|\bgh[opusr]_[A-Za-z0-9]{20,}|"
+    r"\bgithub_pat_[A-Za-z0-9_]{20,})"
+)
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(password|passwd|token|secret|api_?key|credential)\s*[=:]\s*\S+"
+)
+_WINDOWS_PATH = re.compile(r"(?i)(?<![A-Z])(?:[A-Z]:[\\/]|\\\\)[^\r\n\t]+")
+_POSIX_PRIVATE_PATH = re.compile(r"/(?:home|Users|var|etc|opt|srv|tmp)/[^\s'\"]+")
 
 
 class PublishError(RuntimeError):
@@ -30,24 +53,77 @@ class GitPublisher:
         *,
         generated_path: str = "docs/ai",
         allow_push: bool = False,
+        git_timeout_seconds: float | None = None,
     ) -> None:
         self.repository = Path(repository).resolve()
         self.generated_path = Path(generated_path)
         if self.generated_path.is_absolute() or ".." in self.generated_path.parts:
             raise ValueError("generated_path must stay inside the repository")
         self.allow_push = allow_push
+        configured_timeout: float | str = (
+            os.environ.get(
+                GIT_TIMEOUT_ENVIRONMENT_VARIABLE,
+                str(DEFAULT_GIT_TIMEOUT_SECONDS),
+            )
+            if git_timeout_seconds is None
+            else git_timeout_seconds
+        )
+        try:
+            timeout = float(configured_timeout)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("git_timeout_seconds must be a number") from exc
+        if not math.isfinite(timeout) or not 0 < timeout <= MAX_GIT_TIMEOUT_SECONDS:
+            raise ValueError(
+                f"git_timeout_seconds must be greater than zero and no more than "
+                f"{MAX_GIT_TIMEOUT_SECONDS:g}"
+            )
+        self.git_timeout_seconds = timeout
+
+    @staticmethod
+    def _safe_error(detail: object) -> str:
+        """Return a single-line, credential-safe, bounded diagnostic."""
+
+        text = _ANSI_ESCAPE.sub("", str(detail))
+        text = _URL_CREDENTIALS.sub(r"\g<scheme><redacted>@", text)
+        text = _SECRET_VALUE.sub("<redacted>", text)
+        text = _SECRET_ASSIGNMENT.sub(r"\1=<redacted>", text)
+        text = _WINDOWS_PATH.sub("<path>", text)
+        text = _POSIX_PRIVATE_PATH.sub("<path>", text)
+        text = " ".join(text.split()) or "git operation failed"
+        if len(text) > MAX_GIT_ERROR_CHARACTERS:
+            text = text[: MAX_GIT_ERROR_CHARACTERS - 3].rstrip() + "..."
+        return text
+
+    def _raise_for_result(self, result: subprocess.CompletedProcess[str]) -> None:
+        detail = result.stderr or result.stdout or "git operation failed"
+        raise PublishError(self._safe_error(detail))
 
     def _git(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-        result = subprocess.run(
-            ["git", *arguments],
-            cwd=self.repository,
-            text=True,
-            capture_output=True,
-            check=False,
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "GIT_TERMINAL_PROMPT": "0",
+                "GCM_INTERACTIVE": "Never",
+            }
         )
+        try:
+            result = subprocess.run(
+                ["git", *arguments],
+                cwd=self.repository,
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+                timeout=self.git_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            raise PublishError(
+                f"git operation timed out after {self.git_timeout_seconds:g} seconds"
+            ) from None
+        except OSError as exc:
+            raise PublishError(self._safe_error(exc)) from None
         if check and result.returncode != 0:
-            detail = (result.stderr or result.stdout or "git operation failed").strip()
-            raise PublishError(detail)
+            self._raise_for_result(result)
         return result
 
     def stage(self) -> bool:
@@ -55,6 +131,8 @@ class GitPublisher:
             raise PublishError("publication repository is not initialized")
         self._git("add", "--", self.generated_path.as_posix())
         status = self._git("diff", "--cached", "--quiet", "--", self.generated_path.as_posix(), check=False)
+        if status.returncode not in (0, 1):
+            self._raise_for_result(status)
         return status.returncode == 1
 
     def commit(
@@ -64,6 +142,8 @@ class GitPublisher:
         rolling_snapshot: bool = False,
     ) -> bool:
         staged = self._git("diff", "--cached", "--quiet", check=False)
+        if staged.returncode not in (0, 1):
+            self._raise_for_result(staged)
         if staged.returncode == 0:
             return False
         if rolling_snapshot:

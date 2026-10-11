@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from fixedstep_monitor.publisher import GitPublisher, PublishError
+from fixedstep_monitor.publisher import (
+    GIT_TIMEOUT_ENVIRONMENT_VARIABLE,
+    MAX_GIT_ERROR_CHARACTERS,
+    GitPublisher,
+    PublishError,
+)
 from fixedstep_monitor.sanitizer import sanitize_public_data
 from fixedstep_monitor.strategy_state import StrategyStateError, StrategyStateReader
 
@@ -108,6 +114,60 @@ class PublisherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaises(ValueError):
                 GitPublisher(temporary, generated_path="../outside")
+
+    def test_git_is_noninteractive_and_has_a_configurable_timeout(self):
+        completed = subprocess.CompletedProcess(["git", "status"], 0, "ok", "")
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "fixedstep_monitor.publisher.subprocess.run", return_value=completed
+        ) as run:
+            result = GitPublisher(temporary, git_timeout_seconds=7.5)._git("status")
+
+        self.assertIs(result, completed)
+        options = run.call_args.kwargs
+        self.assertEqual(options["timeout"], 7.5)
+        self.assertEqual(options["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertEqual(options["env"]["GCM_INTERACTIVE"], "Never")
+
+    def test_timeout_can_be_configured_by_environment(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(
+            os.environ, {GIT_TIMEOUT_ENVIRONMENT_VARIABLE: "9"}
+        ):
+            publisher = GitPublisher(temporary)
+        self.assertEqual(publisher.git_timeout_seconds, 9)
+
+    def test_git_timeout_has_a_bounded_safe_error(self):
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "fixedstep_monitor.publisher.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git", "push"], 3),
+        ):
+            with self.assertRaisesRegex(
+                PublishError, "git operation timed out after 3 seconds"
+            ) as raised:
+                GitPublisher(temporary, git_timeout_seconds=3)._git("push")
+        self.assertLessEqual(len(str(raised.exception)), MAX_GIT_ERROR_CHARACTERS)
+
+    def test_git_failure_redacts_credentials_and_bounds_diagnostic(self):
+        credential = "github_pat_" + "A" * 40
+        completed = subprocess.CompletedProcess(
+            ["git", "push"],
+            128,
+            "",
+            (
+                f"fatal: https://monitor:{credential}@github.com/private/repo "
+                f"token={credential} "
+                + "x" * 2000
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "fixedstep_monitor.publisher.subprocess.run", return_value=completed
+        ):
+            with self.assertRaises(PublishError) as raised:
+                GitPublisher(temporary)._git("push")
+
+        message = str(raised.exception)
+        self.assertNotIn(credential, message)
+        self.assertIn("<redacted>", message)
+        self.assertLessEqual(len(message), MAX_GIT_ERROR_CHARACTERS)
 
 
 if __name__ == "__main__":

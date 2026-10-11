@@ -30,7 +30,7 @@ if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
     throw "Python executable was not found. Create the project virtual environment first."
 }
 if (-not $DatabasePath) {
-    $DatabasePath = Join-Path $resolvedProject 'data\fixedstep-monitor.sqlite3'
+    $DatabasePath = Join-Path $resolvedProject 'runtime\fixedstep-monitor.sqlite3'
 }
 if (-not $SiteRoot) {
     $SiteRoot = Join-Path $resolvedProject 'docs'
