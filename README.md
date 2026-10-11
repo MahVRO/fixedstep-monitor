@@ -21,9 +21,9 @@ Private SQLite history (full fidelity, WAL)
               │ allowlist + sanitizer
               ▼
 Static JSON / CSV / SVG / HTML
-              │ rolling snapshot every 10 minutes
+              │ rolling `live`-branch snapshot every 10 minutes
               ▼
-GitHub Pages
+GitHub Pages branch-source deployment
 ```
 
 Account observations are labelled account-wide. Closed-record statistics are labelled with their actual filter scope and grain. The default closed-record grain is one MT5 closing execution/deal, so partial closes can create multiple rows; it is not silently presented as one complete position lifecycle.
@@ -68,4 +68,4 @@ See [OPERATIONS.md](OPERATIONS.md) for installation, publication, freshness, res
 
 ## Hosting cadence
 
-The collector target is 60 seconds. The default public push target is 10 minutes, followed by GitHub Pages deployment and cache propagation. The dashboard reports source freshness and public-snapshot freshness separately; it does not claim 30–60 second public freshness on Pages.
+The collector target is 60 seconds. The default public push target is 10 minutes, followed by GitHub Pages branch deployment and cache propagation. The dashboard reports source freshness and public-snapshot freshness separately; it does not claim 30–60 second public freshness on Pages.

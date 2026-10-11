@@ -95,7 +95,7 @@ Check that:
 - the public snapshot advances about once per ten minutes;
 - `snapshot_id` matches across all five core JSON files;
 - source and public freshness warnings behave independently;
-- the GitHub Pages workflow succeeds;
+- the GitHub Pages deployment reports `built` for the `live` branch;
 - reconnecting after an outage retains history and changes status back to `live`;
 - restarting the task does not duplicate closed execution IDs.
 
