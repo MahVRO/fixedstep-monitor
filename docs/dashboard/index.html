@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0e14">
+  <title>FixedStep0.5 live monitor</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to monitoring data</a>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">F0.5</span>
+      <div>
+        <p class="eyebrow">Read-only strategy telemetry</p>
+        <h1>FixedStep0.5</h1>
+      </div>
+    </div>
+    <div class="live-meta" aria-live="polite">
+      <span id="status-pill" class="status-pill status-unknown"><span class="status-dot"></span>Checking source</span>
+      <span id="updated-at">No collection received</span>
+    </div>
+  </header>
+
+  <div id="alert" class="alert alert-warn" role="status">
+    <strong>Waiting for a verified source.</strong>
+    <span>No account or trade values are shown until the read-only collector completes successfully.</span>
+  </div>
+
+  <main id="content" class="page">
+    <section class="toolbar" aria-label="Dashboard controls">
+      <div class="range-group" role="group" aria-label="Date range">
+        <button type="button" data-range="24h" aria-pressed="false">24 hours</button>
+        <button type="button" data-range="7d" aria-pressed="false">7 days</button>
+        <button type="button" data-range="30d" aria-pressed="false">30 days</button>
+        <button type="button" class="is-active" data-range="all" aria-pressed="true">All available</button>
+      </div>
+      <div class="custom-range">
+        <label>From (UTC) <input id="date-from" type="datetime-local"></label>
+        <label>To (UTC) <input id="date-to" type="datetime-local"></label>
+        <button id="apply-range" type="button">Apply</button>
+        <button id="reset-zoom" type="button" class="quiet">Reset zoom</button>
+      </div>
+      <p id="range-message" class="range-message" role="status" aria-live="polite"></p>
+      <a class="ai-link" href="../ai/">AI-readable view <span aria-hidden="true">↗</span></a>
+    </section>
+
+    <section class="scope-note" aria-label="Data scope">
+      <strong id="scope-heading">Scope not yet verified</strong>
+      <span id="scope-detail">Account values and strategy-filtered execution records are kept distinct.</span>
+    </section>
+
+    <section class="kpi-grid" aria-label="Account performance">
+      <article class="kpi kpi-primary">
+        <p>Equity</p>
+        <strong id="kpi-equity">Unavailable</strong>
+        <small id="kpi-equity-note">No verified sample</small>
+      </article>
+      <article class="kpi">
+        <p>Balance</p>
+        <strong id="kpi-balance">Unavailable</strong>
+        <small id="kpi-balance-note">No verified sample</small>
+      </article>
+      <article class="kpi">
+        <p>Daily realized P&amp;L</p>
+        <strong id="kpi-daily">Unavailable</strong>
+        <small>UTC calendar day</small>
+      </article>
+      <article class="kpi">
+        <p>Weekly realized P&amp;L</p>
+        <strong id="kpi-weekly">Unavailable</strong>
+        <small>UTC calendar week</small>
+      </article>
+      <article class="kpi">
+        <p>Monthly realized P&amp;L</p>
+        <strong id="kpi-monthly">Unavailable</strong>
+        <small>UTC calendar month</small>
+      </article>
+      <article class="kpi">
+        <p>Total realized P&amp;L</p>
+        <strong id="kpi-total">Unavailable</strong>
+        <small>Available execution history</small>
+      </article>
+      <article class="kpi">
+        <p>Net return</p>
+        <strong id="kpi-return">Unavailable</strong>
+        <small id="kpi-return-note">Initial capital unavailable</small>
+      </article>
+      <article class="kpi">
+        <p>Current drawdown</p>
+        <strong id="kpi-drawdown">Unavailable</strong>
+        <small id="kpi-drawdown-note">Peak-to-current equity</small>
+      </article>
+      <article class="kpi">
+        <p>Maximum drawdown</p>
+        <strong id="kpi-max-drawdown">Unavailable</strong>
+        <small id="kpi-max-drawdown-note">Observed equity history</small>
+      </article>
+      <article class="kpi">
+        <p>Initial capital</p>
+        <strong id="kpi-initial">Unavailable</strong>
+        <small>Shown only when explicitly configured</small>
+      </article>
+      <article class="kpi">
+        <p>Open positions</p>
+        <strong id="kpi-open">Unavailable</strong>
+        <small id="kpi-open-note">Live position count</small>
+      </article>
+    </section>
+
+    <section class="strategy-strip" aria-label="Strategy state">
+      <div><span>Status</span><strong id="strategy-status">Unavailable</strong></div>
+      <div><span>Symbol</span><strong id="strategy-symbol">Unavailable</strong></div>
+      <div><span>Step / level</span><strong id="strategy-step">Unavailable</strong></div>
+      <div><span id="strategy-floating-label">Account unrealized P&amp;L</span><strong id="strategy-floating">Unavailable</strong></div>
+      <div><span>Source lag</span><strong id="source-lag">Unavailable</strong></div>
+    </section>
+
+    <section class="chart-grid" aria-label="Performance charts">
+      <article class="panel panel-wide">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Account trajectory</p><h2>Balance and equity</h2></div>
+          <div class="chart-meta"><span class="chart-legend" aria-label="Chart legend"><span><i class="swatch swatch-balance"></i>Balance</span><span><i class="swatch swatch-equity"></i>Equity</span></span><span class="chart-help">Hover for values · wheel or +/− to zoom · arrow keys to move · Home to reset</span></div>
+        </div>
+        <div class="chart-wrap"><canvas id="equity-chart" tabindex="0" role="img" aria-label="Balance and equity over time" aria-describedby="equity-chart-summary"></canvas><p class="empty-chart">No verified equity samples.</p><p id="equity-chart-summary" class="sr-only">No verified equity samples.</p></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Risk</p><h2>Drawdown</h2></div></div>
+        <div class="chart-wrap"><canvas id="drawdown-chart" tabindex="0" role="img" aria-label="Drawdown over time" aria-describedby="drawdown-chart-summary"></canvas><p class="empty-chart">No verified drawdown samples.</p><p id="drawdown-chart-summary" class="sr-only">No verified drawdown samples.</p></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Closing executions</p><h2>Cumulative realized P&amp;L</h2></div></div>
+        <div class="chart-wrap"><canvas id="pnl-chart" tabindex="0" role="img" aria-label="Cumulative realized profit and loss from closing executions" aria-describedby="pnl-chart-summary"></canvas><p class="empty-chart">No verified closing executions.</p><p id="pnl-chart-summary" class="sr-only">No verified closing executions.</p></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Distribution</p><h2>Individual closing-execution results</h2></div></div>
+        <div class="chart-wrap"><canvas id="trade-results-chart" tabindex="0" role="img" aria-label="Individual closing execution results" aria-describedby="trade-results-chart-summary"></canvas><p class="empty-chart">No verified closing executions.</p><p id="trade-results-chart-summary" class="sr-only">No verified closing executions.</p></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Execution behavior</p><h2>Entry and exit prices</h2></div></div>
+        <div class="chart-wrap"><canvas id="price-chart" tabindex="0" role="img" aria-label="Entry and exit prices for closing executions" aria-describedby="price-chart-summary"></canvas><p class="empty-chart">No paired entry and exit prices.</p><p id="price-chart-summary" class="sr-only">No paired entry and exit prices.</p></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Strategy-specific</p><h2>Step progression</h2></div></div>
+        <div class="chart-wrap"><canvas id="step-chart" tabindex="0" role="img" aria-label="FixedStep0.5 step progression" aria-describedby="step-chart-summary"></canvas><p class="empty-chart">Step state is not exposed by the source.</p><p id="step-chart-summary" class="sr-only">Step state is not exposed by the source.</p></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">UTC calendar days</p><h2>Daily realized P&amp;L</h2></div></div>
+        <div class="chart-wrap"><canvas id="daily-pnl-chart" tabindex="0" role="img" aria-label="Daily realized profit and loss" aria-describedby="daily-pnl-chart-summary"></canvas><p class="empty-chart">No verified daily results.</p><p id="daily-pnl-chart-summary" class="sr-only">No verified daily results.</p></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">UTC calendar days</p><h2>Closing-execution activity</h2></div></div>
+        <div class="chart-wrap"><canvas id="activity-chart" tabindex="0" role="img" aria-label="Closing execution activity over time" aria-describedby="activity-chart-summary"></canvas><p class="empty-chart">No verified execution activity.</p><p id="activity-chart-summary" class="sr-only">No verified execution activity.</p></div>
+      </article>
+    </section>
+
+    <section class="stats-grid" aria-label="Closing-execution statistics">
+      <article><span>Win rate</span><strong id="stat-win-rate">Unavailable</strong></article>
+      <article><span>Profit factor</span><strong id="stat-profit-factor">Unavailable</strong></article>
+      <article><span>Average win</span><strong id="stat-avg-win">Unavailable</strong></article>
+      <article><span>Average loss</span><strong id="stat-avg-loss">Unavailable</strong></article>
+      <article><span>Best trade</span><strong id="stat-best">Unavailable</strong></article>
+      <article><span>Worst trade</span><strong id="stat-worst">Unavailable</strong></article>
+      <article><span>Win streak</span><strong id="stat-win-streak">Unavailable</strong></article>
+      <article><span>Loss streak</span><strong id="stat-loss-streak">Unavailable</strong></article>
+    </section>
+    <p id="statistics-scope" class="stats-note">Statistics use the selected date range and the published record grain.</p>
+
+    <section class="panel table-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Account exposure</p><h2 id="open-positions-title">Open positions</h2></div>
+        <span id="open-count" class="count-label">No verified positions</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Opened (UTC)</th><th>Symbol</th><th>Side</th><th>Volume</th><th>Entry</th><th>Current</th><th>SL</th><th>TP</th><th>Floating P&amp;L</th><th>Duration</th></tr></thead>
+          <tbody id="open-positions"><tr><td colspan="10" class="empty-cell">No verified open-position data.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel table-panel">
+      <div class="panel-heading trade-heading">
+        <div><p class="eyebrow">Inspectable history</p><h2 id="closed-records-title">Closing executions</h2><p id="closed-records-grain" class="grain-note">One row per MT5 closing execution/deal; a partial close can create several rows.</p></div>
+        <div class="table-filters">
+          <label>Side <select id="filter-side"><option value="all">All</option><option value="buy">Buy</option><option value="sell">Sell</option></select></label>
+          <label>Symbol <select id="filter-symbol"><option value="all">All</option></select></label>
+        </div>
+      </div>
+      <div class="table-scroll trade-scroll">
+        <table>
+          <thead><tr><th>Closed (UTC)</th><th>Opened (UTC)</th><th>Symbol</th><th>Side</th><th>Volume</th><th>Entry</th><th>Exit</th><th>SL</th><th>TP</th><th>Commission</th><th>Swap</th><th>Net P&amp;L</th><th>Duration</th></tr></thead>
+          <tbody id="closed-trades"><tr><td colspan="13" class="empty-cell">No verified closed-trade data.</td></tr></tbody>
+        </table>
+      </div>
+      <footer class="table-footer"><span id="trade-count">0 records shown</span><a href="../ai/data/trades.csv">Download CSV</a></footer>
+    </section>
+
+    <footer class="page-footer">
+      <p>Public, sanitized, read-only telemetry. Values are omitted when the source cannot prove them.</p>
+      <nav><a href="../ai/manifest.json">Dataset manifest</a><a href="../ai/data/latest.json">Latest JSON</a><a href="https://github.com/MahVRO/fixedstep-monitor">Source code</a></nav>
+    </footer>
+  </main>
+  <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+  <script src="app.js" defer></script>
+</body>
+</html>

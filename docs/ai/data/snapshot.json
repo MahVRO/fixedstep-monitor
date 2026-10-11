@@ -1,0 +1,127 @@
+{
+  "schema_version": "1.0",
+  "snapshot_id": "bfc39dbe-3728-47bc-86bd-070b44e1d984",
+  "generated_at": "2026-10-11T01:36:30.718Z",
+  "timezone": "UTC",
+  "scope": {
+    "account": "account-wide MT5 account observations",
+    "trades": "not yet verified; no source collection has established the trade selector"
+  },
+  "coverage": {
+    "account_samples": 0,
+    "closed_trade_records": 0,
+    "strategy_samples": 0,
+    "strategy_events": 0,
+    "closed_trade_grain": "one MT5 closing execution/deal; partial closes may create multiple records",
+    "published_account_samples": 0,
+    "account_publication_policy": "full source cadence for 7 days; last observed sample per UTC hour for days 8-90; last observed sample per UTC day thereafter; no interpolation"
+  },
+  "meta": {
+    "omissions": [
+      {
+        "field": "account.initial_capital",
+        "reason": "No explicit initial-capital evidence is available."
+      },
+      {
+        "field": "account.net_return",
+        "reason": "Requires explicit initial-capital evidence."
+      },
+      {
+        "field": "account.net_return_pct",
+        "reason": "Requires explicit initial-capital evidence."
+      },
+      {
+        "field": "strategy.status",
+        "reason": "The optional strategy-state source did not provide this field."
+      },
+      {
+        "field": "strategy.symbol",
+        "reason": "The optional strategy-state source did not provide this field."
+      },
+      {
+        "field": "strategy.step",
+        "reason": "The optional strategy-state source did not provide this field."
+      },
+      {
+        "field": "strategy.level",
+        "reason": "The optional strategy-state source did not provide this field."
+      },
+      {
+        "field": "closed_trades.stop_loss",
+        "reason": "MT5 closing deals do not expose the historical stop-loss value."
+      },
+      {
+        "field": "closed_trades.take_profit",
+        "reason": "MT5 closing deals do not expose the historical take-profit value."
+      },
+      {
+        "field": "charts.trade_entries_exits",
+        "reason": "No paired execution-price observations are available for this chart."
+      },
+      {
+        "field": "account.balance",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "account.equity",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "account.unrealized_pnl",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "periods",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "drawdown",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "counts.open_positions",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "counts.closed_trades",
+        "reason": "No successful MT5 source observation is available."
+      }
+    ],
+    "actual_data_only": true,
+    "closed_trade_grain": "one MT5 closing execution/deal; partial closes may create multiple records",
+    "field_definitions": {
+      "realized_pnl": "Sum of available net_profit on MT5 closing deal records in the UTC period.",
+      "unrealized_pnl": "MT5 account profit at collection time.",
+      "drawdown_abs": "Running peak equity minus observed equity.",
+      "drawdown_pct": "Drawdown_abs divided by running peak equity, when the peak is positive.",
+      "win_rate": "Profitable closing deal records divided by profitable plus losing records; breakeven records are excluded.",
+      "profit_factor": "Gross profitable net results divided by the absolute gross losing net results."
+    }
+  },
+  "collection": {
+    "status": "no_data",
+    "generated_at": "2026-10-11T01:36:30.718Z",
+    "published_at": "2026-10-11T01:36:30.718Z",
+    "source_stale_after_seconds": 180,
+    "public_stale_after_seconds": 1200,
+    "expected_collection_interval_seconds": 60,
+    "expected_publish_interval_seconds": 600
+  },
+  "account": {},
+  "periods": {},
+  "drawdown": {},
+  "counts": {},
+  "strategy": {},
+  "links": {
+    "dashboard": "https://mahvro.github.io/fixedstep-monitor/dashboard/",
+    "ai": "https://mahvro.github.io/fixedstep-monitor/ai/",
+    "manifest": "https://mahvro.github.io/fixedstep-monitor/ai/manifest.json",
+    "latest_json": "https://mahvro.github.io/fixedstep-monitor/ai/data/latest.json",
+    "trades_json": "https://mahvro.github.io/fixedstep-monitor/ai/data/trades.json",
+    "equity_json": "https://mahvro.github.io/fixedstep-monitor/ai/data/equity.json",
+    "statistics_json": "https://mahvro.github.io/fixedstep-monitor/ai/data/statistics.json",
+    "strategy_json": "https://mahvro.github.io/fixedstep-monitor/ai/data/strategy.json",
+    "trades_csv": "https://mahvro.github.io/fixedstep-monitor/ai/data/trades.csv",
+    "equity_csv": "https://mahvro.github.io/fixedstep-monitor/ai/data/equity.csv"
+  }
+}

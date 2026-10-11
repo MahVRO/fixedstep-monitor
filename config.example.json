@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "note": "Reference deployment values; pass them through the documented CLI or scheduled-task installer.",
+  "collection_interval_seconds": 60,
+  "publication_interval_seconds": 600,
+  "source_stale_after_seconds": 180,
+  "public_stale_after_seconds": 1200,
+  "history_overlap_hours": 24,
+  "initial_history_days": 3650,
+  "symbol_allowlist": ["FixedStep0.5"],
+  "strategy_magic_numbers": [],
+  "strategy_state_file": null,
+  "database_path": "runtime/fixedstep-monitor.sqlite3",
+  "public_output_dir": "docs",
+  "public_base_url": "https://mahvro.github.io/fixedstep-monitor",
+  "public_equity_retention": "7 days full cadence, days 8-90 hourly, older daily; private SQLite remains full fidelity",
+  "git_publish": {
+    "enabled": false,
+    "remote": "origin",
+    "branch": "live",
+    "minimum_interval_seconds": 600
+  }
+}

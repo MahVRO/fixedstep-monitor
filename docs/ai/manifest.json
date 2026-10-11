@@ -1,0 +1,237 @@
+{
+  "schema_version": "1.0",
+  "snapshot_id": "bfc39dbe-3728-47bc-86bd-070b44e1d984",
+  "generated_at": "2026-10-11T01:36:30.718Z",
+  "timezone": "UTC",
+  "scope": {
+    "account": "account-wide MT5 account observations",
+    "trades": "not yet verified; no source collection has established the trade selector"
+  },
+  "coverage": {
+    "account_samples": 0,
+    "closed_trade_records": 0,
+    "strategy_samples": 0,
+    "strategy_events": 0,
+    "closed_trade_grain": "one MT5 closing execution/deal; partial closes may create multiple records",
+    "published_account_samples": 0,
+    "account_publication_policy": "full source cadence for 7 days; last observed sample per UTC hour for days 8-90; last observed sample per UTC day thereafter; no interpolation"
+  },
+  "meta": {
+    "omissions": [
+      {
+        "field": "account.initial_capital",
+        "reason": "No explicit initial-capital evidence is available."
+      },
+      {
+        "field": "account.net_return",
+        "reason": "Requires explicit initial-capital evidence."
+      },
+      {
+        "field": "account.net_return_pct",
+        "reason": "Requires explicit initial-capital evidence."
+      },
+      {
+        "field": "strategy.status",
+        "reason": "The optional strategy-state source did not provide this field."
+      },
+      {
+        "field": "strategy.symbol",
+        "reason": "The optional strategy-state source did not provide this field."
+      },
+      {
+        "field": "strategy.step",
+        "reason": "The optional strategy-state source did not provide this field."
+      },
+      {
+        "field": "strategy.level",
+        "reason": "The optional strategy-state source did not provide this field."
+      },
+      {
+        "field": "closed_trades.stop_loss",
+        "reason": "MT5 closing deals do not expose the historical stop-loss value."
+      },
+      {
+        "field": "closed_trades.take_profit",
+        "reason": "MT5 closing deals do not expose the historical take-profit value."
+      },
+      {
+        "field": "charts.trade_entries_exits",
+        "reason": "No paired execution-price observations are available for this chart."
+      },
+      {
+        "field": "account.balance",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "account.equity",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "account.unrealized_pnl",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "periods",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "drawdown",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "counts.open_positions",
+        "reason": "No successful MT5 source observation is available."
+      },
+      {
+        "field": "counts.closed_trades",
+        "reason": "No successful MT5 source observation is available."
+      }
+    ],
+    "actual_data_only": true,
+    "closed_trade_grain": "one MT5 closing execution/deal; partial closes may create multiple records",
+    "field_definitions": {
+      "realized_pnl": "Sum of available net_profit on MT5 closing deal records in the UTC period.",
+      "unrealized_pnl": "MT5 account profit at collection time.",
+      "drawdown_abs": "Running peak equity minus observed equity.",
+      "drawdown_pct": "Drawdown_abs divided by running peak equity, when the peak is positive.",
+      "win_rate": "Profitable closing deal records divided by profitable plus losing records; breakeven records are excluded.",
+      "profit_factor": "Gross profitable net results divided by the absolute gross losing net results."
+    }
+  },
+  "collection": {
+    "status": "no_data",
+    "generated_at": "2026-10-11T01:36:30.718Z",
+    "published_at": "2026-10-11T01:36:30.718Z",
+    "source_stale_after_seconds": 180,
+    "public_stale_after_seconds": 1200,
+    "expected_collection_interval_seconds": 60,
+    "expected_publish_interval_seconds": 600
+  },
+  "page": "https://mahvro.github.io/fixedstep-monitor/ai/",
+  "datasets": [
+    {
+      "title": "Latest snapshot",
+      "format": "json",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/latest.json",
+      "row_count": 1,
+      "available_fields": [
+        "account",
+        "collection",
+        "counts",
+        "coverage",
+        "drawdown",
+        "generated_at",
+        "links",
+        "meta",
+        "periods",
+        "schema_version",
+        "scope",
+        "snapshot_id",
+        "strategy",
+        "timezone"
+      ],
+      "size_bytes": 5009,
+      "sha256": "333002d393673362c58e6c958574e8d8dc774925d0e5827d20159c84d63c537a"
+    },
+    {
+      "title": "Trades",
+      "format": "json",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/trades.json",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 4226,
+      "sha256": "4c31dd79837bdda79e23d30b45e31a11d41ac5b6c8a1479f97a8d1d94f826596"
+    },
+    {
+      "title": "Equity history",
+      "format": "json",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/equity.json",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 4107,
+      "sha256": "1317eae2cdd3df16401d819f41ad29518acc4331f6b1f4b529ee01ca08141253"
+    },
+    {
+      "title": "Statistics",
+      "format": "json",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/statistics.json",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 4161,
+      "sha256": "4c8270df26fa7dcfc5874d0c5ac3d536f9eb123c5ff4d39d0a77cbcb8d0eb237"
+    },
+    {
+      "title": "Strategy state",
+      "format": "json",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/strategy.json",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 4123,
+      "sha256": "720efa610ad7329d2db05aaace2d18216384b98512bdf28ef6a3c6fa4162890f"
+    },
+    {
+      "title": "Trades",
+      "format": "csv",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/trades.csv",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "title": "Equity history",
+      "format": "csv",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/equity.csv",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "title": "Open positions",
+      "format": "csv",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/positions.csv",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "title": "Closed deals",
+      "format": "csv",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/deals.csv",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "title": "Events",
+      "format": "csv",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/events.csv",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "title": "Strategy history",
+      "format": "csv",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/strategy.csv",
+      "row_count": 0,
+      "available_fields": [],
+      "size_bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  ],
+  "charts": [],
+  "freshness": {
+    "status": "no_data",
+    "generated_at": "2026-10-11T01:36:30.718Z",
+    "published_at": "2026-10-11T01:36:30.718Z",
+    "source_stale_after_seconds": 180,
+    "public_stale_after_seconds": 1200,
+    "expected_collection_interval_seconds": 60,
+    "expected_publish_interval_seconds": 600
+  }
+}

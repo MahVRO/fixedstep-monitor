@@ -1,0 +1,41 @@
+# Private runtime state: never publish
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.log
+runtime/
+private/
+secrets/
+backups/
+
+# Local configuration may contain machine paths or private selectors
+config.json
+*.local.json
+
+# Python / tests
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Publisher working tree
+.live-worktree/
+.publish-lock
