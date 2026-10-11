@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$TaskName = 'FixedStep0.5 Read-Only Monitor'
+    [string]$TaskName = 'FixedStep0.5 Quote Monitor'
 )
 
 $ErrorActionPreference = 'Stop'

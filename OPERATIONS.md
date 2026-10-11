@@ -1,138 +1,100 @@
 # Operations runbook
 
-This runbook installs the monitor beside an already authenticated Windows MT5 terminal. It does not install, start, stop, or reconfigure the trading strategy.
+This runbook operates the independent FixedStep0.5 quote monitor beside an already authenticated Windows MT5 terminal. It never starts, stops, configures, or controls a trading strategy.
 
-## Prerequisites
+## Runtime isolation
 
-- Windows with the existing MT5 terminal session available to the same interactive user.
-- Python 3.11 or newer.
-- Git.
-- A checkout of the repository's `live` branch when automatic publication is enabled.
-- A repository-scoped write deploy key or fine-grained credential for this repository only. Never copy a broad personal token to the trading host.
+- Scheduled task: `FixedStep0.5 Quote Monitor`
+- Database: `runtime\fixedstep-quotes.sqlite3`
+- Log: `runtime\quote-monitor.log`
+- Graceful stop marker: `runtime\stop-quote-monitor`
+- Loopback API: `http://127.0.0.1:8765`
 
-The public site is a static telemetry surface, not an access-control boundary. Anything published may be cached or archived.
+These are deliberately distinct from the legacy account monitor. Its task can remain disabled and its `runtime\stop-monitor` marker can remain in place; neither affects the quote runtime.
 
-## 1. Install and test without publishing
-
-From the repository root:
+## Install and verify without publication
 
 ```powershell
-py -3.11 -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[mt5]"
+$env:PYTHONPATH = 'src'
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-.\.venv\Scripts\python.exe -m fixedstep_monitor collect `
-  --database runtime\fixedstep-monitor.sqlite3 `
-  --site-root docs `
-  --symbol FixedStep0.5
+.\scripts\install_scheduled_task.ps1 `
+  -ProjectRoot $PWD.Path `
+  -IntervalSeconds 15 `
+  -PublishIntervalSeconds 600 `
+  -Symbol FixedStep0.5
+
+Start-ScheduledTask -TaskName 'FixedStep0.5 Quote Monitor'
 ```
 
-Inspect `docs\ai\data\latest.json`. A successful source reports `collection.status` as `live`; a disconnected terminal reports `no_data` or `disconnected` and publishes no fabricated metrics.
+Verify:
 
-Before enabling automatic collection, confirm all of the following:
+```powershell
+Get-ScheduledTask -TaskName 'FixedStep0.5 Quote Monitor'
+Get-Content runtime\quote-monitor.log -Tail 30
+Invoke-RestMethod http://127.0.0.1:8765/v1/quotes
+```
 
-1. The exact symbol is `FixedStep0.5`.
-2. Account-wide metrics are acceptable for public release.
-3. The trade scope in `latest.json` matches the intended strategy selector.
-4. No broker identity, raw ticket, comment, path, endpoint, or credential appears under `docs\ai`.
-5. A second run deduplicates closing executions and adds only one new account observation.
+Confirm that:
 
-If the strategy uses a reviewed MT5 magic number, pass it with `-MagicNumber` to the installer. Without that evidence, do not guess one. Optional strategy step/state fields require a separately reviewed JSON status file.
+1. `schema_version` is `fixedstep-quotes-v1`.
+2. `symbol` is exactly `FixedStep0.5`.
+3. `collection.collected_at` advances about every 15 seconds.
+4. `quote.tick_at` is reported separately and may remain unchanged when the market is closed.
+5. bid and ask match MT5, ask is not below bid, and broker `last=0.0` appears publicly as `null`.
+6. generated files contain no account, P&L, position, order, deal, ticket, magic number, terminal path, broker endpoint, or credential.
+7. `/v1/latest` remains a compact quote snapshot, while `/v1/quotes` remains below 3.5 MB and 18,000 public samples.
 
-## 2. Configure the rolling public branch
+## Enable the static GitHub Pages fallback
 
-Automatic publication is intentionally limited to `docs\ai` on the dedicated `live` branch. Each update amends that branch's snapshot commit and pushes with `--force-with-lease`, preventing unbounded ten-minute commit history. The `main` branch remains the source history.
-
-Configure the checkout to use its dedicated repository credential, then verify:
+Use a repository-scoped deploy key on the dedicated `live` checkout. Verify a non-interactive dry run first, then reinstall the task with publication enabled:
 
 ```powershell
 git branch --show-current
-git remote -v
 git push --dry-run origin HEAD:live
-```
 
-The current branch must print `live`. The dry run must succeed without placing a credential in a file, command argument, scheduled-task argument, or log.
-
-## 3. Install restart-resilient collection
-
-Collection starts when the same Windows user logs in, survives collector failures, and is restarted by Task Scheduler after a process failure. This matches MT5's interactive terminal session model.
-
-```powershell
 .\scripts\install_scheduled_task.ps1 `
   -ProjectRoot $PWD.Path `
-  -IntervalSeconds 60 `
+  -PythonExe 'C:\path\to\python.exe' `
+  -IntervalSeconds 15 `
   -PublishIntervalSeconds 600 `
   -Symbol FixedStep0.5 `
   -EnableGitPublish
 ```
 
-Optional reviewed settings:
+`docs\ai\data\latest.json` and the live `/v1/latest` response update every 15 seconds. Bounded history JSON/CSV, static SVGs, the no-JS page, and the manifest rebuild in one background worker after the first collection and then every 600 seconds. The same worker stages, commits, and pushes when publication is enabled, so slow Git/network work cannot pause quote sampling; repeated triggers coalesce rather than overlap. Pages build and cache propagation add variable delay and are not represented as 15-second public freshness.
 
-```powershell
-.\scripts\install_scheduled_task.ps1 `
-  -ProjectRoot $PWD.Path `
-  -Symbol FixedStep0.5 `
-  -MagicNumber 123456 `
-  -InitialCapital 10000 `
-  -StrategyStatePath 'D:\reviewed\fixedstep-state.json' `
-  -EnableGitPublish
-```
+The background history query performs the 24-hour/full, 7-day/minute, and 90-day/hour selection in SQLite before JSON decoding. The full retained-row count is a separate `COUNT(*)`; old local rows are not loaded merely to generate public files.
 
-The example values above are placeholders for operator-supplied evidence; do not copy them into production unless they are authoritative.
-
-## 4. Verify a running installation
-
-```powershell
-Get-ScheduledTask -TaskName 'FixedStep0.5 Read-Only Monitor'
-Get-Content runtime\monitor.log -Tail 30
-.\.venv\Scripts\python.exe -m fixedstep_monitor export `
-  --database runtime\fixedstep-monitor.sqlite3 `
-  --site-root docs
-```
-
-Check that:
-
-- collection timestamps advance about once per minute;
-- the public snapshot advances about once per ten minutes;
-- `snapshot_id` matches across all five core JSON files;
-- source and public freshness warnings behave independently;
-- the GitHub Pages deployment reports `built` for the `live` branch;
-- reconnecting after an outage retains history and changes status back to `live`;
-- restarting the task does not duplicate closed execution IDs.
-
-## Stopping and removing
+## Stop, restart, and remove
 
 Graceful stop:
 
 ```powershell
-New-Item -ItemType File runtime\stop-monitor -Force
+New-Item -ItemType File runtime\stop-quote-monitor -Force
 ```
 
-Before restarting, remove only that exact stop file, then start the scheduled task:
+Before restart, remove only the quote stop marker:
 
 ```powershell
-Remove-Item -LiteralPath runtime\stop-monitor
-Start-ScheduledTask -TaskName 'FixedStep0.5 Read-Only Monitor'
+Remove-Item -LiteralPath runtime\stop-quote-monitor
+Start-ScheduledTask -TaskName 'FixedStep0.5 Quote Monitor'
 ```
 
-Remove the scheduled task:
+Remove the task without deleting data:
 
 ```powershell
 .\scripts\uninstall_scheduled_task.ps1
 ```
 
-Removing the task does not delete SQLite history, logs, the repository, or public GitHub history.
-
 ## Backup and recovery
 
-The authoritative monitor history is `runtime\fixedstep-monitor.sqlite3`, not the public branch. Stop the scheduled task or use SQLite's online backup facility before copying it. Keep backups private; the database contains raw broker identifiers that are deliberately excluded from public exports.
+The local database is authoritative. Stop the quote task or use SQLite's online backup facility before copying `runtime\fixedstep-quotes.sqlite3`. Restoring it preserves deduplication because samples are keyed by exact symbol and broker tick timestamp.
 
-For recovery, restore the database to the configured runtime path, confirm its companion WAL transaction has been checkpointed, run `export`, and then start the scheduled task. A missing database creates a new empty monitor history; it does not affect MT5 or the trading strategy.
+A missing database creates a new empty quote history and does not affect MT5. A disconnected read preserves the last good public quote while marking the collector disconnected; it never substitutes sample data.
 
-## Freshness and incident response
+## Incident response
 
-- Source stale threshold: 180 seconds by default.
-- Public stale threshold: 1,200 seconds by default.
-- Expected collection: 60 seconds.
-- Expected publication: 600 seconds, plus Pages deployment/cache delay.
-
-If an unexpected public field appears, stop the monitor, disable publication, rotate the repository credential if needed, and treat already published content as potentially archived. Do not stop or change the trading system to troubleshoot this independent monitor.
+If an unexpected public field appears, stop the quote task, disable the HTTPS exposure and Git publication, and rotate the repository deploy key if relevant. Treat already published material as potentially cached. Do not stop or change MT5 or another service to troubleshoot this monitor.

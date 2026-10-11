@@ -21,6 +21,19 @@ READ_METHODS = frozenset(
     }
 )
 
+# The quote monitor intentionally has a smaller surface than the legacy account
+# monitor.  Keep this allowlist separate so adding an information call to the
+# legacy adapter cannot silently broaden the process that runs every 15 seconds.
+QUOTE_READ_METHODS = frozenset(
+    {
+        "initialize",
+        "shutdown",
+        "terminal_info",
+        "symbol_info",
+        "symbol_info_tick",
+    }
+)
+
 
 class ReadOnlyMT5Error(RuntimeError):
     pass
@@ -56,6 +69,149 @@ def _text(record: Mapping[str, Any], name: str) -> str | None:
 def _put_if(output: dict[str, Any], key: str, value: Any) -> None:
     if value is not None:
         output[key] = value
+
+
+class QuoteOnlyMT5:
+    """Read one exact symbol quote without touching account or trading APIs."""
+
+    def __init__(
+        self,
+        module: Any | None = None,
+        *,
+        symbol: str = "FixedStep0.5",
+        clock=utc_now,
+    ) -> None:
+        if symbol != "FixedStep0.5":
+            raise ValueError("quote monitor requires the exact FixedStep0.5 symbol")
+        self._module = module
+        self.symbol = str(symbol)
+        self._clock = clock
+        self._initialized = False
+
+    @property
+    def scope(self) -> dict[str, Any]:
+        return {"symbol": self.symbol, "quote_only": True, "filtered": True}
+
+    def _load(self) -> Any:
+        if self._module is None:
+            try:
+                self._module = import_module("MetaTrader5")
+            except ImportError as exc:
+                raise ReadOnlyMT5Error(
+                    "MetaTrader5 is unavailable; install the optional 'mt5' extra on the MT5 host"
+                ) from exc
+        return self._module
+
+    def _call(self, name: str, *args: Any) -> Any:
+        if name not in QUOTE_READ_METHODS:
+            raise ReadOnlyMT5Error(
+                f"MT5 method is not in the quote-only allowlist: {name!r}"
+            )
+        method = getattr(self._load(), name, None)
+        if not callable(method):
+            raise ReadOnlyMT5Error(f"Required MT5 quote method is unavailable: {name}")
+        return method(*args)
+
+    def connect(self) -> None:
+        if self._initialized:
+            return
+        if not self._call("initialize"):
+            raise ReadOnlyMT5Error("MT5 initialization failed")
+        self._initialized = True
+        terminal = _mapping(self._call("terminal_info"))
+        if terminal and not bool(terminal.get("connected", True)):
+            self.close()
+            raise ReadOnlyMT5Error("MT5 terminal reports disconnected")
+
+    def close(self) -> None:
+        if self._initialized:
+            try:
+                self._call("shutdown")
+            finally:
+                self._initialized = False
+
+    def __enter__(self) -> "QuoteOnlyMT5":
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
+
+    def collect(self, *, history_start: datetime | None = None) -> dict[str, Any]:
+        del history_start  # Kept only for compatibility with the collector protocol.
+        collected_at = self._clock().astimezone(UTC)
+        info = _mapping(self._call("symbol_info", self.symbol))
+        if not info:
+            raise ReadOnlyMT5Error(f"MT5 symbol information is unavailable for {self.symbol!r}")
+        reported_name = _text(info, "name")
+        if reported_name is not None and reported_name != self.symbol:
+            raise ReadOnlyMT5Error("MT5 returned a different symbol than requested")
+
+        tick = _mapping(self._call("symbol_info_tick", self.symbol))
+        if not tick:
+            raise ReadOnlyMT5Error(f"MT5 quote is unavailable for {self.symbol!r}")
+        bid = _number(tick, "bid")
+        ask = _number(tick, "ask")
+        if bid is None or ask is None or float(bid) <= 0 or float(ask) <= 0:
+            raise ReadOnlyMT5Error("MT5 bid/ask quote is unavailable")
+        if float(ask) < float(bid):
+            raise ReadOnlyMT5Error("MT5 quote has ask below bid")
+
+        time_msc = _number(tick, "time_msc")
+        if time_msc is not None and float(time_msc) <= 0:
+            time_msc = None
+        tick_seconds = _number(tick, "time")
+        if tick_seconds is not None and float(tick_seconds) <= 0:
+            tick_seconds = None
+        tick_at = epoch_to_iso(
+            tick_seconds, int(time_msc) if time_msc is not None else None
+        )
+        if tick_at is None:
+            raise ReadOnlyMT5Error("MT5 quote timestamp is unavailable")
+
+        point = _number(info, "point")
+        if point is not None and float(point) <= 0:
+            point = None
+        tick_size = _number(info, "trade_tick_size")
+        if tick_size is not None and float(tick_size) <= 0:
+            tick_size = None
+        digits_value = _number(info, "digits")
+        digits = None
+        if (
+            digits_value is not None
+            and float(digits_value).is_integer()
+            and 0 <= int(digits_value) <= 10
+        ):
+            digits = int(digits_value)
+
+        bid_value = float(bid)
+        ask_value = float(ask)
+        spread = ask_value - bid_value
+        quote: dict[str, Any] = {
+            "symbol": self.symbol,
+            "collected_at": iso_utc(collected_at),
+            "tick_at": tick_at,
+            "tick_time_msc": int(time_msc) if time_msc is not None else int(
+                datetime.fromisoformat(tick_at.replace("Z", "+00:00")).timestamp() * 1000
+            ),
+            "bid": bid_value,
+            "ask": ask_value,
+            "mid": (bid_value + ask_value) / 2.0,
+            "spread": spread,
+        }
+        last = _number(tick, "last")
+        # This broker reports 0.0 when Last is unavailable.  It is not a real
+        # positive-price observation and must remain absent/null publicly.
+        if last is not None and float(last) > 0:
+            quote["last"] = float(last)
+        if point is not None:
+            quote["point"] = float(point)
+            quote["spread_points"] = spread / float(point)
+        if tick_size is not None:
+            quote["trade_tick_size"] = float(tick_size)
+        if digits is not None:
+            quote["digits"] = digits
+        return {"observed_at": iso_utc(collected_at), "quote": quote}
 
 
 class ReadOnlyMT5:

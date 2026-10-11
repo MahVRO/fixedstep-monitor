@@ -6,7 +6,13 @@ from collections import namedtuple
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fixedstep_monitor.mt5_readonly import READ_METHODS, ReadOnlyMT5
+from fixedstep_monitor.mt5_readonly import (
+    QUOTE_READ_METHODS,
+    READ_METHODS,
+    QuoteOnlyMT5,
+    ReadOnlyMT5,
+    ReadOnlyMT5Error,
+)
 
 
 def record(**values):
@@ -65,6 +71,38 @@ class FakeMT5:
         )
 
 
+class FakeQuoteMT5:
+    def __init__(self, *, ask=5973.8, last=0.0) -> None:
+        self.calls: list[str] = []
+        self.ask = ask
+        self.last = last
+
+    def initialize(self):
+        self.calls.append("initialize")
+        return True
+
+    def shutdown(self):
+        self.calls.append("shutdown")
+
+    def terminal_info(self):
+        self.calls.append("terminal_info")
+        return record(connected=True, path=r"C:\private\terminal")
+
+    def symbol_info(self, symbol):
+        self.calls.append("symbol_info")
+        return record(name=symbol, digits=1, point=0.1, trade_tick_size=0.1)
+
+    def symbol_info_tick(self, symbol):
+        self.calls.append("symbol_info_tick")
+        return record(
+            time=1_791_725_274,
+            time_msc=1_791_725_274_368,
+            bid=5973.3,
+            ask=self.ask,
+            last=self.last,
+        )
+
+
 class ReadOnlyMT5Tests(unittest.TestCase):
     def test_collects_only_allowlisted_symbol_without_identity_fields_from_account(self):
         module = FakeMT5()
@@ -114,8 +152,48 @@ class ReadOnlyMT5Tests(unittest.TestCase):
                     and isinstance(node.args[0].value, str)
                 ):
                     seen_allowlist_calls.add(node.args[0].value)
-        self.assertLessEqual(seen_allowlist_calls, READ_METHODS)
-        self.assertEqual(seen_allowlist_calls, READ_METHODS)
+        self.assertLessEqual(seen_allowlist_calls, READ_METHODS | QUOTE_READ_METHODS)
+        self.assertEqual(seen_allowlist_calls, READ_METHODS | QUOTE_READ_METHODS)
+
+    def test_quote_only_adapter_uses_exact_allowlist_and_treats_zero_last_as_missing(self):
+        self.assertEqual(
+            QUOTE_READ_METHODS,
+            {
+                "initialize",
+                "shutdown",
+                "terminal_info",
+                "symbol_info",
+                "symbol_info_tick",
+            },
+        )
+        module = FakeQuoteMT5(last=0.0)
+        adapter = QuoteOnlyMT5(
+            module,
+            symbol="FixedStep0.5",
+            clock=lambda: datetime(2026, 10, 11, 12, 0, tzinfo=UTC),
+        )
+        adapter.connect()
+        snapshot = adapter.collect()
+        adapter.close()
+
+        quote = snapshot["quote"]
+        self.assertEqual(quote["symbol"], "FixedStep0.5")
+        self.assertEqual(quote["bid"], 5973.3)
+        self.assertEqual(quote["ask"], 5973.8)
+        self.assertAlmostEqual(quote["mid"], 5973.55)
+        self.assertAlmostEqual(quote["spread"], 0.5)
+        self.assertAlmostEqual(quote["spread_points"], 5.0)
+        self.assertNotIn("last", quote)
+        self.assertEqual(set(module.calls), QUOTE_READ_METHODS)
+
+    def test_quote_only_adapter_rejects_crossed_or_missing_quote(self):
+        adapter = QuoteOnlyMT5(FakeQuoteMT5(ask=5973.2))
+        adapter.connect()
+        with self.assertRaisesRegex(ReadOnlyMT5Error, "ask below bid"):
+            adapter.collect()
+        adapter.close()
+        with self.assertRaisesRegex(ValueError, "exact FixedStep0.5"):
+            QuoteOnlyMT5(FakeQuoteMT5(), symbol="Other")
 
 
 if __name__ == "__main__":
