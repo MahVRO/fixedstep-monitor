@@ -206,6 +206,31 @@ test("strict validator accepts only the quote contract", () => {
   const wrongSymbol = validPayload();
   wrongSymbol.symbol = "EURUSD";
   assert.equal(validateIngestPayload(wrongSymbol).ok, false);
+
+  const overflow = validPayload();
+  overflow.quote.bid = Number.MAX_VALUE;
+  overflow.quote.ask = Number.MAX_VALUE;
+  overflow.quote.mid = 1;
+  overflow.quote.spread = 0;
+  overflow.quote.spread_points = 0;
+  assert.equal(validateIngestPayload(overflow).ok, false);
+
+  const finiteExtreme = validPayload();
+  finiteExtreme.quote.bid = Number.MAX_VALUE;
+  finiteExtreme.quote.ask = Number.MAX_VALUE;
+  finiteExtreme.quote.mid = Number.MAX_VALUE;
+  finiteExtreme.quote.spread = 0;
+  finiteExtreme.quote.spread_points = 0;
+  assert.equal(validateIngestPayload(finiteExtreme).ok, true);
+
+  const impossibleDate = validPayload();
+  impossibleDate.generated_at = "2026-02-31T12:00:00.000Z";
+  assert.equal(validateIngestPayload(impossibleDate).ok, false);
+
+  const uppercaseUuid = validPayload();
+  uppercaseUuid.snapshot_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  uppercaseUuid.snapshot_id = uppercaseUuid.snapshot_id.toUpperCase();
+  assert.equal(validateIngestPayload(uppercaseUuid).ok, false);
 });
 
 test("recursive account, trade, and PnL fields are rejected", async () => {

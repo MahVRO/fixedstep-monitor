@@ -91,16 +91,22 @@ function isNullableFiniteNumber(value) {
 }
 
 function isUtcTimestamp(value) {
-  return (
-    typeof value === "string" &&
-    value.length >= 20 &&
-    value.length <= 32 &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(value) &&
-    Number.isFinite(Date.parse(value))
-  );
+  if (typeof value !== "string" || value.length < 20 || value.length > 32) return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?Z$/.exec(value);
+  if (match === null) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  const instant = new Date(parsed);
+  return instant.getUTCFullYear() === Number(match[1])
+    && instant.getUTCMonth() + 1 === Number(match[2])
+    && instant.getUTCDate() === Number(match[3])
+    && instant.getUTCHours() === Number(match[4])
+    && instant.getUTCMinutes() === Number(match[5])
+    && instant.getUTCSeconds() === Number(match[6]);
 }
 
 function nearlyEqual(left, right) {
+  if (!isFiniteNumber(left) || !isFiniteNumber(right)) return false;
   return Math.abs(left - right) <= Math.max(1e-9, Math.abs(right) * 1e-10);
 }
 
@@ -122,7 +128,7 @@ export function validateIngestPayload(value) {
     value.schema_version !== SCHEMA_VERSION ||
     value.symbol !== SYMBOL ||
     typeof value.snapshot_id !== "string" ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.snapshot_id) ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.snapshot_id) ||
     !isUtcTimestamp(value.generated_at)
   ) {
     return { ok: false, code: "invalid_schema" };
@@ -175,13 +181,14 @@ export function validateIngestPayload(value) {
   }
 
   const spread = quote.ask - quote.bid;
+  const midpoint = quote.bid + spread / 2;
   if (
     !isUtcTimestamp(quote.collected_at) ||
     !isUtcTimestamp(quote.tick_at) ||
     !isFiniteNumber(quote.bid) || quote.bid <= 0 ||
     !isFiniteNumber(quote.ask) || quote.ask < quote.bid ||
     !isNullableFiniteNumber(quote.last) || (quote.last !== null && quote.last <= 0) ||
-    !isFiniteNumber(quote.mid) || !nearlyEqual(quote.mid, (quote.bid + quote.ask) / 2) ||
+    !isFiniteNumber(quote.mid) || !nearlyEqual(quote.mid, midpoint) ||
     !isFiniteNumber(quote.spread) || quote.spread < 0 || !nearlyEqual(quote.spread, spread) ||
     !isNullableFiniteNumber(quote.spread_points) ||
     (quote.spread_points !== null && quote.spread_points < 0) ||
