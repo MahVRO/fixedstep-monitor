@@ -103,14 +103,18 @@ class MockD1 {
       return this.snapshots.get(args[0]) || null;
     }
     if (sql.includes("FROM quote_snapshots") && sql.includes("ORDER BY received_at_ms DESC")) {
-      return this.sorted()[0] || null;
+      return this.sorted().find((row) => row.received_at_ms >= args[0]) || null;
     }
     throw new Error(`Unhandled first: ${sql}`);
   }
 
   async all(sql, args) {
     if (sql.includes("FROM quote_snapshots") && sql.includes("ORDER BY received_at_ms DESC")) {
-      return { results: this.sorted().slice(0, args[0]) };
+      return {
+        results: this.sorted()
+          .filter((row) => row.received_at_ms >= args[0])
+          .slice(0, args[1]),
+      };
     }
     throw new Error(`Unhandled all: ${sql}`);
   }
@@ -341,6 +345,22 @@ test("a later accepted snapshot prunes observations older than 24 hours", async 
   now += limits.retentionMs + 1;
   assert.equal((await ingest(runtime, env, validPayload(2))).status, 201);
   assert.deepEqual([...env.QUOTES_DB.snapshots.keys()], [snapshotId(2)]);
+});
+
+test("reads hide expired observations even when no later ingest runs pruning", async () => {
+  let now = BASE_NOW;
+  const runtime = createWorker({ now: () => now });
+  const env = environment();
+  assert.equal((await ingest(runtime, env, validPayload(1))).status, 201);
+  now += limits.retentionMs + 1;
+  assert.equal(
+    (await runtime.fetch(new Request("https://relay.example/v1/latest"), env)).status,
+    404,
+  );
+  assert.equal(
+    (await runtime.fetch(new Request("https://relay.example/v1/quotes"), env)).status,
+    404,
+  );
 });
 
 test("unknown routes and unsafe methods remain closed", async () => {

@@ -411,13 +411,14 @@ const SELECT_COLUMNS = `
   mid, spread, spread_points, digits, point, trade_tick_size,
   mt5_reported_offset_seconds, mt5_reported_offset_material`;
 
-async function latestRow(db) {
+async function latestRow(db, nowMs) {
   return db.prepare(
     `SELECT ${SELECT_COLUMNS}
      FROM quote_snapshots
+     WHERE received_at_ms >= ?1
      ORDER BY received_at_ms DESC, snapshot_id DESC
      LIMIT 1`,
-  ).first();
+  ).bind(nowMs - RETENTION_MS).first();
 }
 
 async function handleIngest(request, env, nowMs) {
@@ -535,7 +536,7 @@ async function handleIngest(request, env, nowMs) {
 async function handleLatest(request, env, nowMs) {
   if (!env.QUOTES_DB) return errorResponse(request, 503, "service_unavailable");
   try {
-    const row = await latestRow(env.QUOTES_DB);
+    const row = await latestRow(env.QUOTES_DB, nowMs);
     if (row === null) return errorResponse(request, 404, "no_quote_data");
     return jsonResponse(request, 200, buildLatest(row, nowMs));
   } catch {
@@ -561,9 +562,10 @@ async function handleHistory(request, env, nowMs, url) {
     const result = await env.QUOTES_DB.prepare(
       `SELECT ${SELECT_COLUMNS}
        FROM quote_snapshots
+       WHERE received_at_ms >= ?1
        ORDER BY received_at_ms DESC, snapshot_id DESC
-       LIMIT ?1`,
-    ).bind(limit).all();
+       LIMIT ?2`,
+    ).bind(nowMs - RETENTION_MS, limit).all();
     const rows = Array.isArray(result?.results) ? result.results : [];
     if (rows.length === 0) return errorResponse(request, 404, "no_quote_data");
     const latest = buildLatest(rows[0], nowMs);
