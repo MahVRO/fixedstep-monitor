@@ -59,6 +59,11 @@ class DeploymentScriptTests(unittest.TestCase):
         self.assertIn("reason=non_json", runner)
         self.assertIn("if ($line.Length -gt 4096)", runner)
         self.assertIn("-Encoding UTF8", runner)
+        self.assertIn("$priorErrorActionPreference = $ErrorActionPreference", runner)
+        self.assertIn("$ErrorActionPreference = 'Continue'", runner)
+        self.assertIn("runner_pipeline_failed category=", runner)
+        self.assertIn("if ($null -eq $LASTEXITCODE)", runner)
+        self.assertIn("category=NativeInvocationFailed", runner)
         self.assertIn("$exitCode = $LASTEXITCODE", runner)
 
 

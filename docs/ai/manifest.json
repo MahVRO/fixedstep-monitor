@@ -1,7 +1,7 @@
 {
   "schema_version": "fixedstep-quotes-v1",
-  "snapshot_id": "813a6115-9a38-4352-b62f-0ec7ab4b9b54",
-  "generated_at": "2026-10-11T11:29:03.852Z",
+  "snapshot_id": "ee1a2b1f-1bfe-41b7-be92-8cb3e4d081d0",
+  "generated_at": "2026-10-11T13:47:25.270Z",
   "timezone": "UTC",
   "collector_clock_basis": "utc_serialized_host_clock_synchronization_not_asserted",
   "timezone_applies_to": [
@@ -19,22 +19,22 @@
     "expected_collection_interval_seconds": 15,
     "expected_publish_interval_seconds": 600,
     "source_stale_after_seconds": 45,
-    "collected_at": "2026-10-11T11:29:02.966Z",
-    "collection_age_seconds": 0.886767
+    "collected_at": "2026-10-11T13:47:24.742Z",
+    "collection_age_seconds": 0.52873
   },
   "coverage": {
-    "quote_samples": 10,
-    "stored_quote_samples": 10,
+    "quote_samples": 515,
+    "stored_quote_samples": 515,
     "maximum_public_samples": 18000,
     "maximum_public_json_bytes": 3500000,
     "sampling_policy": "15-second source samples for the latest 24 hours; last observed sample per collector first-observation host-clock minute through day 7; last observed sample per collector first-observation host-clock hour through day 90; older samples are not published; raw MT5 time does not control retention; no interpolation",
     "chart_time_basis": "collector_first_observation_host_clock",
-    "history_generated_at": "2026-10-11T11:29:03.852Z",
-    "history_snapshot_id": "813a6115-9a38-4352-b62f-0ec7ab4b9b54",
+    "history_generated_at": "2026-10-11T13:47:25.270Z",
+    "history_snapshot_id": "ee1a2b1f-1bfe-41b7-be92-8cb3e4d081d0",
     "collection_start_at": "2026-10-11T10:54:53.830Z",
-    "collection_end_at": "2026-10-11T11:29:03.661Z",
+    "collection_end_at": "2026-10-11T13:47:24.750Z",
     "mt5_reported_start_at": "2026-10-11T13:56:10.365Z",
-    "mt5_reported_end_at": "2026-10-11T14:30:20.364Z"
+    "mt5_reported_end_at": "2026-10-11T16:48:41.365Z"
   },
   "page": "https://mahvro.github.io/fixedstep-monitor/ai/",
   "datasets": [
@@ -59,14 +59,14 @@
         "timezone",
         "timezone_applies_to"
       ],
-      "size_bytes": 2507,
-      "sha256": "91e5ce436d9b83150fa153881cbae08820188a88cbfff1b29e851e695150af71"
+      "size_bytes": 2508,
+      "sha256": "f277523abca5d0c53a9e1f32b59bd98095cafcf9c6816b3633454fe3894da8b6"
     },
     {
       "title": "Quote history",
       "format": "json",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/quotes.json",
-      "row_count": 10,
+      "row_count": 515,
       "available_fields": [
         "collected_at",
         "tick_at",
@@ -77,14 +77,14 @@
         "spread",
         "spread_points"
       ],
-      "size_bytes": 4166,
-      "sha256": "816fe726582d6ba4b1cc04ccd6d02ca1514c29f58a7cf2ec79de60446cfcc6b4"
+      "size_bytes": 87997,
+      "sha256": "76bc64a25006bc8ccbbfc17a5e69c0d2683c86254ab564af52c234882369e53e"
     },
     {
       "title": "Quote history",
       "format": "csv",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/quotes.csv",
-      "row_count": 10,
+      "row_count": 515,
       "available_fields": [
         "collected_at",
         "tick_at",
@@ -95,8 +95,8 @@
         "spread",
         "spread_points"
       ],
-      "size_bytes": 869,
-      "sha256": "fb5706afe59642412fa5b12bda6d158aea7c074575ee2c6a4904d27785ef22f7"
+      "size_bytes": 41774,
+      "sha256": "564b4121e41d1b26a84becd3c5aebc3d79a0d370ccaea4c1a01f9ec06f589e3e"
     }
   ],
   "charts": [
@@ -104,15 +104,15 @@
       "title": "FixedStep0.5 bid, mid and ask",
       "format": "svg",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/charts/fixedstep-price.svg",
-      "size_bytes": 2876,
-      "sha256": "c40766a792917c9c56057170b33476590549d0b6747804505037f52b034185eb"
+      "size_bytes": 24320,
+      "sha256": "c4eef3ccf8c354c9f79c11a8209003f7349cea29a0ed33d5b5c43055aecce719"
     },
     {
       "title": "FixedStep0.5 spread",
       "format": "svg",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/charts/fixedstep-spread.svg",
-      "size_bytes": 2175,
-      "sha256": "35bd62bceb4ee214ca7ebbda74fec1c91cdb7311b2806caa3645a8f1ee2afc1e"
+      "size_bytes": 9326,
+      "sha256": "48e91bb1c8d08c42c7fb94a7ee1427a1d7f662e9bab58a24d725e8f70dfd76ec"
     }
   ]
 }
