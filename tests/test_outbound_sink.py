@@ -205,6 +205,8 @@ class OutboundPublisherTests(unittest.TestCase):
             "https://example.workers.dev/v1/ingest?token=bad",
             "https://example.workers.dev/v1/ingest#fragment",
             "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev:444/v1/ingest",
+            "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev:abc/v1/ingest",
+            "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev:99999/v1/ingest",
             "https://different-worker.example.workers.dev/v1/ingest",
         )
         for url in invalid_urls:

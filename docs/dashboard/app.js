@@ -82,8 +82,19 @@ function isFiniteNumber(value) {
 
 function parseTimestamp(value) {
   if (typeof value !== "string" || !value) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?Z$/.exec(value);
+  if (match === null) return null;
   const milliseconds = Date.parse(value);
-  return Number.isFinite(milliseconds) ? milliseconds : null;
+  if (!Number.isFinite(milliseconds)) return null;
+  const instant = new Date(milliseconds);
+  return instant.getUTCFullYear() === Number(match[1])
+    && instant.getUTCMonth() + 1 === Number(match[2])
+    && instant.getUTCDate() === Number(match[3])
+    && instant.getUTCHours() === Number(match[4])
+    && instant.getUTCMinutes() === Number(match[5])
+    && instant.getUTCSeconds() === Number(match[6])
+    ? milliseconds
+    : null;
 }
 
 function escapeHtml(value) {
@@ -116,6 +127,7 @@ function validatedTimestamp(value, field, { required = false } = {}) {
 }
 
 function nearlyEqual(left, right) {
+  if (!isFiniteNumber(left) || !isFiniteNumber(right)) return false;
   const scale = Math.max(1, Math.abs(left), Math.abs(right));
   return Math.abs(left - right) <= scale * 1e-10;
 }
@@ -147,8 +159,11 @@ function normalizeQuote(raw, context, fieldPrefix) {
   }
 
   if (bid !== null && ask !== null) {
-    const derivedMid = (bid + ask) / 2;
+    const derivedMid = bid + (ask - bid) / 2;
     const derivedSpread = ask - bid;
+    if (!isFiniteNumber(derivedMid) || !isFiniteNumber(derivedSpread)) {
+      throw new Error(`${fieldPrefix} derived price values are not finite`);
+    }
     if (mid !== null && !nearlyEqual(mid, derivedMid)) throw new Error(`${fieldPrefix}.mid is inconsistent with bid and ask`);
     if (spread !== null && !nearlyEqual(spread, derivedSpread)) throw new Error(`${fieldPrefix}.spread is inconsistent with bid and ask`);
     mid = derivedMid;
@@ -156,6 +171,9 @@ function normalizeQuote(raw, context, fieldPrefix) {
   }
   if (spread !== null && point !== null) {
     const derivedSpreadPoints = spread / point;
+    if (!isFiniteNumber(derivedSpreadPoints)) {
+      throw new Error(`${fieldPrefix}.spread_points cannot be derived as a finite number`);
+    }
     if (spreadPoints !== null && !nearlyEqual(spreadPoints, derivedSpreadPoints)) {
       throw new Error(`${fieldPrefix}.spread_points is inconsistent with spread and point`);
     }
