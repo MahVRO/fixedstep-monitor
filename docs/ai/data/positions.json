@@ -1,23 +1,35 @@
 {
   "schema_version": "1.0",
-  "snapshot_id": "c53e7dc7-444d-4b0d-9118-b549ad856836",
-  "generated_at": "2026-10-11T01:41:32.725Z",
+  "snapshot_id": "ad8f7d45-b44c-4881-8a98-286e603e0c11",
+  "generated_at": "2026-10-11T10:15:07.821Z",
   "timezone": "UTC",
   "scope": {
     "account": "account-wide MT5 account observations",
-    "trades": "not yet verified; no source collection has established the trade selector"
+    "trades": "configured MT5 symbol/magic allowlist",
+    "trade_selector": {
+      "magic_filter_configured": false,
+      "symbols": [
+        "FixedStep0.5"
+      ]
+    }
   },
   "coverage": {
-    "account_samples": 0,
+    "account_samples": 7,
     "closed_trade_records": 0,
     "strategy_samples": 0,
     "strategy_events": 0,
     "closed_trade_grain": "one MT5 closing execution/deal; partial closes may create multiple records",
-    "published_account_samples": 0,
+    "account_start_at": "2026-10-11T09:59:02.529Z",
+    "account_end_at": "2026-10-11T10:15:07.812Z",
+    "published_account_samples": 7,
     "account_publication_policy": "full source cadence for 7 days; last observed sample per UTC hour for days 8-90; last observed sample per UTC day thereafter; no interpolation"
   },
   "meta": {
     "omissions": [
+      {
+        "field": "trade_scope.magic_filter_configured",
+        "reason": "sensitive field excluded"
+      },
       {
         "field": "account.initial_capital",
         "reason": "No explicit initial-capital evidence is available."
@@ -57,34 +69,6 @@
       {
         "field": "charts.trade_entries_exits",
         "reason": "No paired execution-price observations are available for this chart."
-      },
-      {
-        "field": "account.balance",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "account.equity",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "account.unrealized_pnl",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "periods",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "drawdown",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "counts.open_positions",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "counts.closed_trades",
-        "reason": "No successful MT5 source observation is available."
       }
     ],
     "actual_data_only": true,
@@ -99,13 +83,18 @@
     }
   },
   "collection": {
-    "status": "no_data",
-    "generated_at": "2026-10-11T01:41:32.725Z",
-    "published_at": "2026-10-11T01:41:32.725Z",
+    "status": "live",
+    "generated_at": "2026-10-11T10:15:07.821Z",
+    "published_at": "2026-10-11T10:15:07.821Z",
     "source_stale_after_seconds": 180,
     "public_stale_after_seconds": 1200,
     "expected_collection_interval_seconds": 60,
-    "expected_publish_interval_seconds": 600
+    "expected_publish_interval_seconds": 600,
+    "collected_at": "2026-10-11T10:15:07.812Z",
+    "source_stale_after_at": "2026-10-11T10:18:07.812Z",
+    "public_stale_after_at": "2026-10-11T10:35:07.821Z",
+    "source_lag_seconds": 0.009035
   },
+  "source_observed_at": "2026-10-11T10:15:07.812Z",
   "positions": []
 }

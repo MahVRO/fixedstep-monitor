@@ -13,6 +13,8 @@ param(
     [int]$IntervalSeconds = 60,
     [ValidateRange(600, 86400)]
     [int]$PublishIntervalSeconds = 600,
+    [ValidateRange(1, 600)]
+    [int]$GitTimeoutSeconds = 120,
     [string[]]$Symbols = @('FixedStep0.5'),
     [long[]]$MagicNumbers = @(),
     [Nullable[double]]$InitialCapital,
@@ -39,7 +41,7 @@ function Write-MonitorLog([string]$Level, [string]$Message) {
     Add-Content -LiteralPath $logPath -Value "$timestamp [$Level] $Message" -Encoding UTF8
 }
 
-$lastPublish = [DateTimeOffset]::MinValue
+$lastPublishAttempt = [DateTimeOffset]::MinValue
 Write-MonitorLog 'INFO' "monitor_started collection_interval=$IntervalSeconds publish_enabled=$($EnableGitPublish.IsPresent)"
 
 while (-not (Test-Path -LiteralPath $stopPath)) {
@@ -75,8 +77,11 @@ while (-not (Test-Path -LiteralPath $stopPath)) {
         Write-MonitorLog 'ERROR' "collection_failed $($_.Exception.Message)"
     }
 
-    $publishDue = ([DateTimeOffset]::UtcNow - $lastPublish).TotalSeconds -ge $PublishIntervalSeconds
+    $publishDue = ([DateTimeOffset]::UtcNow - $lastPublishAttempt).TotalSeconds -ge $PublishIntervalSeconds
     if ($EnableGitPublish -and $publishDue) {
+        # Advance the attempt clock before publication so failures cannot cause a
+        # retry on every collection cycle.
+        $lastPublishAttempt = [DateTimeOffset]::UtcNow
         try {
             $publishArguments = @(
                 '-m', 'fixedstep_monitor', 'publish',
@@ -86,11 +91,17 @@ while (-not (Test-Path -LiteralPath $stopPath)) {
                 '--remote', $GitRemote,
                 '--branch', $GitBranch
             )
-            $publishOutput = (& $resolvedPython @publishArguments 2>&1 | Out-String).Trim()
+            $priorGitTimeout = $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS
+            $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS = [string]$GitTimeoutSeconds
+            try {
+                $publishOutput = (& $resolvedPython @publishArguments 2>&1 | Out-String).Trim()
+            }
+            finally {
+                $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS = $priorGitTimeout
+            }
             if ($LASTEXITCODE -ne 0) {
                 throw "publisher_exit=$LASTEXITCODE"
             }
-            $lastPublish = [DateTimeOffset]::UtcNow
             Write-MonitorLog 'INFO' "publication_complete $publishOutput"
         }
         catch {

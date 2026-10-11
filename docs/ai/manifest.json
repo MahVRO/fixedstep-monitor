@@ -1,23 +1,35 @@
 {
   "schema_version": "1.0",
-  "snapshot_id": "c53e7dc7-444d-4b0d-9118-b549ad856836",
-  "generated_at": "2026-10-11T01:41:32.725Z",
+  "snapshot_id": "ad8f7d45-b44c-4881-8a98-286e603e0c11",
+  "generated_at": "2026-10-11T10:15:07.821Z",
   "timezone": "UTC",
   "scope": {
     "account": "account-wide MT5 account observations",
-    "trades": "not yet verified; no source collection has established the trade selector"
+    "trades": "configured MT5 symbol/magic allowlist",
+    "trade_selector": {
+      "magic_filter_configured": false,
+      "symbols": [
+        "FixedStep0.5"
+      ]
+    }
   },
   "coverage": {
-    "account_samples": 0,
+    "account_samples": 7,
     "closed_trade_records": 0,
     "strategy_samples": 0,
     "strategy_events": 0,
     "closed_trade_grain": "one MT5 closing execution/deal; partial closes may create multiple records",
-    "published_account_samples": 0,
+    "account_start_at": "2026-10-11T09:59:02.529Z",
+    "account_end_at": "2026-10-11T10:15:07.812Z",
+    "published_account_samples": 7,
     "account_publication_policy": "full source cadence for 7 days; last observed sample per UTC hour for days 8-90; last observed sample per UTC day thereafter; no interpolation"
   },
   "meta": {
     "omissions": [
+      {
+        "field": "trade_scope.magic_filter_configured",
+        "reason": "sensitive field excluded"
+      },
       {
         "field": "account.initial_capital",
         "reason": "No explicit initial-capital evidence is available."
@@ -57,34 +69,6 @@
       {
         "field": "charts.trade_entries_exits",
         "reason": "No paired execution-price observations are available for this chart."
-      },
-      {
-        "field": "account.balance",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "account.equity",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "account.unrealized_pnl",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "periods",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "drawdown",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "counts.open_positions",
-        "reason": "No successful MT5 source observation is available."
-      },
-      {
-        "field": "counts.closed_trades",
-        "reason": "No successful MT5 source observation is available."
       }
     ],
     "actual_data_only": true,
@@ -99,14 +83,19 @@
     }
   },
   "collection": {
-    "status": "no_data",
-    "generated_at": "2026-10-11T01:41:32.725Z",
-    "published_at": "2026-10-11T01:41:32.725Z",
+    "status": "live",
+    "generated_at": "2026-10-11T10:15:07.821Z",
+    "published_at": "2026-10-11T10:15:07.821Z",
     "source_stale_after_seconds": 180,
     "public_stale_after_seconds": 1200,
     "expected_collection_interval_seconds": 60,
-    "expected_publish_interval_seconds": 600
+    "expected_publish_interval_seconds": 600,
+    "collected_at": "2026-10-11T10:15:07.812Z",
+    "source_stale_after_at": "2026-10-11T10:18:07.812Z",
+    "public_stale_after_at": "2026-10-11T10:35:07.821Z",
+    "source_lag_seconds": 0.009035
   },
+  "source_observed_at": "2026-10-11T10:15:07.812Z",
   "page": "https://mahvro.github.io/fixedstep-monitor/ai/",
   "datasets": [
     {
@@ -127,11 +116,12 @@
         "schema_version",
         "scope",
         "snapshot_id",
+        "source_observed_at",
         "strategy",
         "timezone"
       ],
-      "size_bytes": 5009,
-      "sha256": "6b027ea2348569fd16abccfe2f9dd5693a4bbf2025570d0b1ebee339ffc48602"
+      "size_bytes": 5267,
+      "sha256": "e062f02069ece490ed9402d79e6f0c0faa45961b331b2e6e0e52e843730a5882"
     },
     {
       "title": "Trades",
@@ -139,26 +129,39 @@
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/trades.json",
       "row_count": 0,
       "available_fields": [],
-      "size_bytes": 4226,
-      "sha256": "218e15e1f76b44c76d5e463c341edf39c5b98b3496f86e72b5bd99b3eb9a36bd"
+      "size_bytes": 3908,
+      "sha256": "ed2a93e5462a42903699392153669043687317f50bd6ddac75819c98f8d2e63a"
     },
     {
       "title": "Equity history",
       "format": "json",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/equity.json",
-      "row_count": 0,
-      "available_fields": [],
-      "size_bytes": 4107,
-      "sha256": "e1c1ba080f1cba7854fde63c5bd349727cb38c5e1b77cc5b069641e7c6477b16"
+      "row_count": 7,
+      "available_fields": [
+        "balance",
+        "currency",
+        "drawdown_abs",
+        "equity",
+        "free_margin",
+        "margin",
+        "margin_level",
+        "observed_at",
+        "unrealized_pnl"
+      ],
+      "size_bytes": 5604,
+      "sha256": "b520ea73444ecd08c77f52eb47a3bfa9773c57f7ed73c86e5bbdf0004744c623"
     },
     {
       "title": "Statistics",
       "format": "json",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/statistics.json",
-      "row_count": 0,
-      "available_fields": [],
-      "size_bytes": 4161,
-      "sha256": "025c4fa7bf793bf57fd644b6b5d1d4c2690bc91149bf2165b6781694900e181f"
+      "row_count": 1,
+      "available_fields": [
+        "closed_trades",
+        "trades_with_net_profit"
+      ],
+      "size_bytes": 4319,
+      "sha256": "adc056e6807c6c2324108d9772c402cba7718f229d8fd5cad8be151a52350af7"
     },
     {
       "title": "Strategy state",
@@ -166,8 +169,8 @@
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/strategy.json",
       "row_count": 0,
       "available_fields": [],
-      "size_bytes": 4123,
-      "sha256": "dc4650cc6223434618d62031c499150419aa072cfbad2da40980414bf0c66c9c"
+      "size_bytes": 3805,
+      "sha256": "5d1c46507102ca71a9a03963d78d3532e4a35afe0fe1d50f1eb4847d4cdd7bc7"
     },
     {
       "title": "Trades",
@@ -182,10 +185,20 @@
       "title": "Equity history",
       "format": "csv",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/equity.csv",
-      "row_count": 0,
-      "available_fields": [],
-      "size_bytes": 1,
-      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      "row_count": 7,
+      "available_fields": [
+        "balance",
+        "currency",
+        "drawdown_abs",
+        "equity",
+        "free_margin",
+        "margin",
+        "margin_level",
+        "observed_at",
+        "unrealized_pnl"
+      ],
+      "size_bytes": 495,
+      "sha256": "c83287305ec05c42726d8834a9ffa628fc03ef4d72158001a65ac4a9dfb2e5ec"
     },
     {
       "title": "Open positions",
@@ -224,14 +237,33 @@
       "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
     }
   ],
-  "charts": [],
+  "charts": [
+    {
+      "title": "Balance and equity history",
+      "format": "svg",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/charts/equity-balance.svg",
+      "size_bytes": 2363,
+      "sha256": "30e69bfa895957a3491815b900ce353b50f582bc126aca9d9c68ad21cc4afc16"
+    },
+    {
+      "title": "Drawdown over time",
+      "format": "svg",
+      "url": "https://mahvro.github.io/fixedstep-monitor/ai/charts/drawdown.svg",
+      "size_bytes": 2055,
+      "sha256": "9611b15bc7699bbf7cf2931f97bc3881e296de7f49c781cd141cb3096471e7f6"
+    }
+  ],
   "freshness": {
-    "status": "no_data",
-    "generated_at": "2026-10-11T01:41:32.725Z",
-    "published_at": "2026-10-11T01:41:32.725Z",
+    "status": "live",
+    "generated_at": "2026-10-11T10:15:07.821Z",
+    "published_at": "2026-10-11T10:15:07.821Z",
     "source_stale_after_seconds": 180,
     "public_stale_after_seconds": 1200,
     "expected_collection_interval_seconds": 60,
-    "expected_publish_interval_seconds": 600
+    "expected_publish_interval_seconds": 600,
+    "collected_at": "2026-10-11T10:15:07.812Z",
+    "source_stale_after_at": "2026-10-11T10:18:07.812Z",
+    "public_stale_after_at": "2026-10-11T10:35:07.821Z",
+    "source_lag_seconds": 0.009035
   }
 }
