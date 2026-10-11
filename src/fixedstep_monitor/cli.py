@@ -91,6 +91,9 @@ def build_parser() -> argparse.ArgumentParser:
     quote_live.add_argument("--api-host", default="127.0.0.1")
     quote_live.add_argument("--api-port", type=int, default=8765)
     quote_live.add_argument(
+        "--api-data-dir", type=Path, default=Path("runtime/quote-api")
+    )
+    quote_live.add_argument(
         "--allowed-origin", default="https://mahvro.github.io"
     )
     quote_live.add_argument("--stop-file", type=Path)
@@ -134,13 +137,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error("--publish-interval must be at least 600 seconds")
         if args.api_port < 0 or args.api_port > 65535:
             parser.error("--api-port must be between 0 and 65535")
+        api_data_dir = args.api_data_dir.resolve()
+        static_ai_root = (args.site_root / "ai").resolve()
+        try:
+            api_data_dir.relative_to(static_ai_root)
+        except ValueError:
+            pass
+        else:
+            parser.error("--api-data-dir must be outside the static docs/ai tree")
 
         # Imported only for the live command so static export and unit tests do
         # not acquire an inbound-server dependency.
         from .quote_api import QuoteApiServer
 
         stop_event = threading.Event()
-        bundle_lock = threading.RLock()
         server = None
         with MonitorStore(args.database) as store:
             exporter = QuoteStaticExporter(
@@ -151,14 +161,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_collection_interval_seconds=args.interval,
                 expected_publish_interval_seconds=args.publish_interval,
                 public_base_url=args.public_base_url,
-                write_lock=bundle_lock,
+                live_latest_path=api_data_dir / "latest.json",
             )
             exporter.export()
+            exporter.export_latest()
             server = QuoteApiServer(
-                args.site_root / "ai" / "data",
-                args.api_host,
-                args.api_port,
-                args.allowed_origin,
+                host=args.api_host,
+                port=args.api_port,
+                allowed_origin=args.allowed_origin,
+                latest_path=api_data_dir / "latest.json",
+                quotes_path=args.site_root / "ai" / "data" / "quotes.json",
             ).start()
             collector = QuoteCollector(
                 store,
@@ -203,7 +215,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                         expected_collection_interval_seconds=args.interval,
                         expected_publish_interval_seconds=args.publish_interval,
                         public_base_url=args.public_base_url,
-                        write_lock=bundle_lock,
                     )
 
                     def stage_snapshot() -> None:

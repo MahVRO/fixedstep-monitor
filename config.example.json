@@ -6,9 +6,10 @@
   "source_stale_after_seconds": 45,
   "static_publication_interval_seconds": 600,
   "database_path": "runtime/fixedstep-quotes.sqlite3",
+  "api_data_dir": "runtime/quote-api",
   "public_output_dir": "docs",
   "public_base_url": "https://mahvro.github.io/fixedstep-monitor",
-  "quote_publication_policy": "24 hours full cadence, days 2-7 last observed sample per UTC minute, days 8-90 last observed sample per UTC hour; older samples stay local-only and SQLite remains full fidelity",
+  "quote_publication_policy": "collector first-observation host clock: 24 hours full cadence, days 2-7 last observed sample per minute, days 8-90 last observed sample per hour; raw MT5 time never controls retention; older samples stay local-only and SQLite remains full fidelity",
   "api": {
     "host": "127.0.0.1",
     "port": 8765,

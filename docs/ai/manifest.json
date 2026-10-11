@@ -1,8 +1,17 @@
 {
   "schema_version": "fixedstep-quotes-v1",
-  "snapshot_id": "5bfc245d-534f-4fe9-b163-38ffbe09304a",
-  "generated_at": "2026-10-11T10:54:53.876Z",
+  "snapshot_id": "813a6115-9a38-4352-b62f-0ec7ab4b9b54",
+  "generated_at": "2026-10-11T11:29:03.852Z",
   "timezone": "UTC",
+  "collector_clock_basis": "utc_serialized_host_clock_synchronization_not_asserted",
+  "timezone_applies_to": [
+    "generated_at",
+    "collection.collected_at",
+    "quote.collected_at",
+    "samples[].collected_at"
+  ],
+  "tick_time_basis": "mt5_reported_unverified",
+  "chart_time_basis": "collector_first_observation_host_clock",
   "symbol": "FixedStep0.5",
   "collection": {
     "status": "live",
@@ -10,19 +19,22 @@
     "expected_collection_interval_seconds": 15,
     "expected_publish_interval_seconds": 600,
     "source_stale_after_seconds": 45,
-    "collected_at": "2026-10-11T10:54:53.583Z",
-    "collection_age_seconds": 0.293981
+    "collected_at": "2026-10-11T11:29:02.966Z",
+    "collection_age_seconds": 0.886767
   },
   "coverage": {
-    "quote_samples": 1,
-    "stored_quote_samples": 1,
+    "quote_samples": 10,
+    "stored_quote_samples": 10,
     "maximum_public_samples": 18000,
     "maximum_public_json_bytes": 3500000,
-    "sampling_policy": "15-second source samples for the latest 24 hours; last observed sample per UTC minute through day 7; last observed sample per UTC hour through day 90; older samples are not published; no interpolation",
-    "history_generated_at": "2026-10-11T10:54:53.876Z",
-    "history_snapshot_id": "5bfc245d-534f-4fe9-b163-38ffbe09304a",
-    "quote_start_at": "2026-10-11T13:56:10.365Z",
-    "quote_end_at": "2026-10-11T13:56:10.365Z"
+    "sampling_policy": "15-second source samples for the latest 24 hours; last observed sample per collector first-observation host-clock minute through day 7; last observed sample per collector first-observation host-clock hour through day 90; older samples are not published; raw MT5 time does not control retention; no interpolation",
+    "chart_time_basis": "collector_first_observation_host_clock",
+    "history_generated_at": "2026-10-11T11:29:03.852Z",
+    "history_snapshot_id": "813a6115-9a38-4352-b62f-0ec7ab4b9b54",
+    "collection_start_at": "2026-10-11T10:54:53.830Z",
+    "collection_end_at": "2026-10-11T11:29:03.661Z",
+    "mt5_reported_start_at": "2026-10-11T13:56:10.365Z",
+    "mt5_reported_end_at": "2026-10-11T14:30:20.364Z"
   },
   "page": "https://mahvro.github.io/fixedstep-monitor/ai/",
   "datasets": [
@@ -32,7 +44,9 @@
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/latest.json",
       "row_count": 1,
       "available_fields": [
+        "chart_time_basis",
         "collection",
+        "collector_clock_basis",
         "coverage",
         "generated_at",
         "links",
@@ -41,16 +55,18 @@
         "schema_version",
         "snapshot_id",
         "symbol",
-        "timezone"
+        "tick_time_basis",
+        "timezone",
+        "timezone_applies_to"
       ],
-      "size_bytes": 1808,
-      "sha256": "0e578513370674c752ebbc6e8b29a16fc843eea4d736fe7a0be93facf01b6227"
+      "size_bytes": 2507,
+      "sha256": "91e5ce436d9b83150fa153881cbae08820188a88cbfff1b29e851e695150af71"
     },
     {
       "title": "Quote history",
       "format": "json",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/quotes.json",
-      "row_count": 1,
+      "row_count": 10,
       "available_fields": [
         "collected_at",
         "tick_at",
@@ -61,14 +77,14 @@
         "spread",
         "spread_points"
       ],
-      "size_bytes": 1973,
-      "sha256": "b80515b7f34084da504635c8cc155d231cfc09728fc746dafcc8cdbbc6f2c387"
+      "size_bytes": 4166,
+      "sha256": "816fe726582d6ba4b1cc04ccd6d02ca1514c29f58a7cf2ec79de60446cfcc6b4"
     },
     {
       "title": "Quote history",
       "format": "csv",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/quotes.csv",
-      "row_count": 1,
+      "row_count": 10,
       "available_fields": [
         "collected_at",
         "tick_at",
@@ -79,8 +95,8 @@
         "spread",
         "spread_points"
       ],
-      "size_bytes": 140,
-      "sha256": "bfc81c5daa1fe76d9d78f8d6115934468fe968a299076b36e6dbc78d0a0c3a60"
+      "size_bytes": 869,
+      "sha256": "fb5706afe59642412fa5b12bda6d158aea7c074575ee2c6a4904d27785ef22f7"
     }
   ],
   "charts": [
@@ -88,15 +104,15 @@
       "title": "FixedStep0.5 bid, mid and ask",
       "format": "svg",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/charts/fixedstep-price.svg",
-      "size_bytes": 2252,
-      "sha256": "03b9ed429662829f368b81885dcbcc2bd4c6868d99ba50945411afb107e0c34f"
+      "size_bytes": 2876,
+      "sha256": "c40766a792917c9c56057170b33476590549d0b6747804505037f52b034185eb"
     },
     {
       "title": "FixedStep0.5 spread",
       "format": "svg",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/charts/fixedstep-spread.svg",
-      "size_bytes": 1809,
-      "sha256": "d6439fd760a27215c59c9a627b62f386b49887fb8234db38dcaf0febf6a169f1"
+      "size_bytes": 2175,
+      "sha256": "35bd62bceb4ee214ca7ebbda74fec1c91cdb7311b2806caa3645a8f1ee2afc1e"
     }
   ]
 }

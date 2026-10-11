@@ -151,6 +151,7 @@ def _line_svg(
     *,
     y_label: str,
     y_decimals: int = 2,
+    time_description: str = "UTC",
     width: int = 1200,
     height: int = 480,
 ) -> str | None:
@@ -223,7 +224,7 @@ def _line_svg(
         for index in label_indices
     ]
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
-<title id="title">{html.escape(title)}</title><desc id="desc">Static UTC time-series chart. {html.escape(y_label)}.</desc>
+<title id="title">{html.escape(title)}</title><desc id="desc">Static {html.escape(time_description)} time-series chart. {html.escape(y_label)}.</desc>
 <style>.bg{{fill:#0b1020}}.grid{{stroke:#26334d;stroke-width:1}}.axis{{fill:#aebbd0;font:13px system-ui,sans-serif}}.legend{{fill:#dce6f5;font:14px system-ui,sans-serif}}.heading{{fill:#f5f8ff;font:600 22px system-ui,sans-serif}}.ylabel{{fill:#aebbd0;font:13px system-ui,sans-serif}}</style>
 <rect class="bg" width="100%" height="100%" rx="16"/><text x="{left}" y="34" class="heading">{html.escape(title)}</text>
 <text x="20" y="{top+plot_h/2:.2f}" transform="rotate(-90 20 {top+plot_h/2:.2f})" text-anchor="middle" class="ylabel">{html.escape(y_label)}</text>

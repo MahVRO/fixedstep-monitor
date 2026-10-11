@@ -11,8 +11,9 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const HISTORY_REFRESH_MS = 5 * 60_000;
 const STATIC_RETRY_MS = 60_000;
 const DEFAULT_STALE_SECONDS = 45;
-const MAX_HISTORY_MS = 25 * 60 * 60 * 1000;
-const MAX_HISTORY_SAMPLES = 7_500;
+const MATERIAL_CLOCK_OFFSET_SECONDS = 300;
+const MAX_HISTORY_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_HISTORY_SAMPLES = 18_000;
 
 const state = {
   samples: [],
@@ -24,6 +25,7 @@ const state = {
   latestPollRunning: false,
   fullRefreshRunning: false,
   lastStaticAttemptAt: 0,
+  latestReceiptMonotonicMs: null,
 };
 
 const utcDate = new Intl.DateTimeFormat(undefined, {
@@ -66,10 +68,11 @@ function escapeHtml(value) {
   })[character]);
 }
 
-function validatedNumber(value, field, { positive = false, integer = false } = {}) {
+function validatedNumber(value, field, { positive = false, nonNegative = false, integer = false } = {}) {
   if (value === null || value === undefined) return null;
   if (!isFiniteNumber(value)) throw new Error(`${field} must be a finite number or null`);
   if (positive && value <= 0) throw new Error(`${field} must be positive`);
+  if (nonNegative && value < 0) throw new Error(`${field} must not be negative`);
   if (integer && !Number.isInteger(value)) throw new Error(`${field} must be an integer`);
   return value;
 }
@@ -134,8 +137,23 @@ function normalizeQuote(raw, context, fieldPrefix) {
   if (spread !== null && spread < 0) throw new Error(`${fieldPrefix}.spread cannot be negative`);
   if (spreadPoints !== null && spreadPoints < 0) throw new Error(`${fieldPrefix}.spread_points cannot be negative`);
 
-  const tick = validatedTimestamp(raw.tick_at ?? context.tickAt, `${fieldPrefix}.tick_at`);
-  const collected = validatedTimestamp(raw.collected_at ?? context.collectedAt, `${fieldPrefix}.collected_at`);
+  const tick = validatedTimestamp(raw.tick_at, `${fieldPrefix}.tick_at`, { required: true });
+  const collected = validatedTimestamp(raw.collected_at, `${fieldPrefix}.collected_at`, { required: true });
+  let reportedOffsetSeconds = validatedNumber(
+    raw.mt5_reported_offset_seconds,
+    `${fieldPrefix}.mt5_reported_offset_seconds`,
+  );
+  if (reportedOffsetSeconds === null && tick.milliseconds !== null && collected.milliseconds !== null) {
+    reportedOffsetSeconds = (tick.milliseconds - collected.milliseconds) / 1000;
+  }
+  let reportedOffsetMaterial = raw.mt5_reported_offset_material;
+  if (reportedOffsetMaterial !== null && reportedOffsetMaterial !== undefined && typeof reportedOffsetMaterial !== "boolean") {
+    throw new Error(`${fieldPrefix}.mt5_reported_offset_material must be a boolean`);
+  }
+  if (reportedOffsetMaterial === null || reportedOffsetMaterial === undefined) {
+    reportedOffsetMaterial = reportedOffsetSeconds !== null
+      && Math.abs(reportedOffsetSeconds) >= MATERIAL_CLOCK_OFFSET_SECONDS;
+  }
 
   return {
     collected_at: collected.text,
@@ -151,6 +169,8 @@ function normalizeQuote(raw, context, fieldPrefix) {
     trade_tick_size: tradeTickSize,
     _collected_ms: collected.milliseconds,
     _tick_ms: tick.milliseconds,
+    _mt5_reported_offset_seconds: reportedOffsetSeconds,
+    _mt5_reported_offset_material: reportedOffsetMaterial,
   };
 }
 
@@ -182,6 +202,11 @@ function normalizePayload(payload) {
     "collection.expected_collection_interval_seconds",
     { positive: true },
   );
+  const collectionAgeSeconds = validatedNumber(
+    collectionRaw.collection_age_seconds,
+    "collection.collection_age_seconds",
+    { nonNegative: true },
+  );
   const connected = collectionRaw.connected === null || collectionRaw.connected === undefined
     ? null
     : collectionRaw.connected;
@@ -192,10 +217,22 @@ function normalizePayload(payload) {
   if (!new Set(["live", "disconnected", "no_data", "stale", "degraded", "unavailable"]).has(status)) {
     throw new Error("collection.status is invalid");
   }
+  const tickTimeBasis = payload.tick_time_basis ?? "mt5_reported_unverified";
+  if (tickTimeBasis !== "mt5_reported_unverified") {
+    throw new Error("tick_time_basis is unsupported");
+  }
+  const collectorClockBasis = payload.collector_clock_basis
+    ?? "utc_serialized_host_clock_synchronization_not_asserted";
+  if (collectorClockBasis !== "utc_serialized_host_clock_synchronization_not_asserted") {
+    throw new Error("collector_clock_basis is unsupported");
+  }
+  const chartTimeBasis = payload.chart_time_basis ?? "collector_first_observation_host_clock";
+  if (chartTimeBasis !== "collector_first_observation_host_clock") {
+    throw new Error("chart_time_basis is unsupported");
+  }
+  const snapshotId = typeof payload.snapshot_id === "string" ? payload.snapshot_id : null;
 
   const quoteContext = {
-    collectedAt: collectionTime.text,
-    tickAt: payload.quote?.tick_at ?? null,
     digits: payload.quote?.digits ?? null,
     point: payload.quote?.point ?? null,
     tradeTickSize: payload.quote?.trade_tick_size ?? null,
@@ -212,15 +249,21 @@ function normalizePayload(payload) {
 
   return {
     schema_version: payload.schema_version,
+    snapshot_id: snapshotId,
     symbol: payload.symbol,
     generated_at: generatedTime.text,
+    _generated_ms: generatedTime.milliseconds,
     published_at: publishedTime.text,
+    tick_time_basis: tickTimeBasis,
+    collector_clock_basis: collectorClockBasis,
+    chart_time_basis: chartTimeBasis,
     collection: {
       status,
       connected,
       collected_at: collectionTime.text,
       expected_collection_interval_seconds: intervalSeconds,
       source_stale_after_seconds: staleSeconds,
+      collection_age_seconds: collectionAgeSeconds,
       _collected_ms: collectionTime.milliseconds,
     },
     quote,
@@ -246,13 +289,13 @@ function mergeSamples(incoming) {
   }
 
   let rows = [...merged.values()].sort((left, right) => {
-    const leftTime = left._tick_ms ?? left._collected_ms ?? -Infinity;
-    const rightTime = right._tick_ms ?? right._collected_ms ?? -Infinity;
-    return leftTime - rightTime || (left._collected_ms ?? 0) - (right._collected_ms ?? 0);
+    const leftTime = left._collected_ms ?? -Infinity;
+    const rightTime = right._collected_ms ?? -Infinity;
+    return leftTime - rightTime || (left._tick_ms ?? 0) - (right._tick_ms ?? 0);
   });
-  const newestTick = rows.reduce((latest, row) => Math.max(latest, row._tick_ms ?? -Infinity), -Infinity);
-  if (Number.isFinite(newestTick)) {
-    rows = rows.filter(row => row._tick_ms === null || row._tick_ms >= newestTick - MAX_HISTORY_MS);
+  const newestCollection = rows.reduce((latest, row) => Math.max(latest, row._collected_ms ?? -Infinity), -Infinity);
+  if (Number.isFinite(newestCollection)) {
+    rows = rows.filter(row => row._collected_ms !== null && row._collected_ms >= newestCollection - MAX_HISTORY_MS);
   }
   if (rows.length > MAX_HISTORY_SAMPLES) rows = rows.slice(-MAX_HISTORY_SAMPLES);
   state.samples = rows;
@@ -262,8 +305,8 @@ function newestQuoteFrom(normalized) {
   if (normalized.quote) return normalized.quote;
   return normalized.samples.reduce((latest, row) => {
     if (!latest) return row;
-    const latestTime = latest._collected_ms ?? latest._tick_ms ?? -Infinity;
-    const rowTime = row._collected_ms ?? row._tick_ms ?? -Infinity;
+    const latestTime = latest._collected_ms ?? -Infinity;
+    const rowTime = row._collected_ms ?? -Infinity;
     return rowTime >= latestTime ? row : latest;
   }, null);
 }
@@ -273,13 +316,27 @@ function adoptPayload(normalized, source) {
   const incomingQuote = newestQuoteFrom(normalized);
   const incomingCollected = normalized.collection._collected_ms ?? incomingQuote?._collected_ms ?? -Infinity;
   const currentCollected = state.latest?.collection?._collected_ms ?? state.latest?.quote?._collected_ms ?? -Infinity;
-  const shouldAdopt = !state.latest
+  const incomingGenerated = normalized._generated_ms ?? -Infinity;
+  const currentGenerated = state.latest?._generated_ms ?? -Infinity;
+  const mayReplaceLatest = source !== "history" || !state.latest;
+  const shouldAdopt = mayReplaceLatest && (
+    !state.latest
     || incomingCollected > currentCollected
-    || (incomingCollected === currentCollected && source === "live" && state.latestSource !== "live");
+    || (incomingCollected === currentCollected && incomingGenerated > currentGenerated)
+    || (
+      incomingCollected === currentCollected
+      && incomingGenerated === currentGenerated
+      && normalized.snapshot_id !== state.latest?.snapshot_id
+      && source === "live"
+    )
+    || (incomingCollected === currentCollected && source === "live" && state.latestSource !== "live")
+  );
 
   if (shouldAdopt) {
     state.latest = { ...normalized, quote: incomingQuote };
     state.latestSource = source;
+    state.latestReceiptMonotonicMs = normalized._received_monotonic_ms
+      ?? window.performance.now();
   }
 }
 
@@ -296,7 +353,9 @@ async function fetchJson(url) {
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return normalizePayload(await response.json());
+    const body = await response.json();
+    const receivedMonotonicMs = window.performance.now();
+    return { ...normalizePayload(body), _received_monotonic_ms: receivedMonotonicMs };
   } finally {
     window.clearTimeout(timeout);
   }
@@ -315,15 +374,25 @@ async function fetchStaticFallback() {
 
 async function bootstrap() {
   state.fullRefreshRunning = true;
+  let historyLoaded = false;
   try {
     const normalized = await fetchJson(LIVE_HISTORY_URL);
+    adoptPayload(normalized, "history");
+    historyLoaded = true;
+  } catch {
+    await fetchStaticFallback();
+  }
+  try {
+    const normalized = await fetchJson(LIVE_LATEST_URL);
     state.liveTransportOk = true;
     state.transportError = false;
     adoptPayload(normalized, "live");
   } catch {
     state.liveTransportOk = false;
     state.transportError = true;
-    await fetchStaticFallback();
+    if (!historyLoaded && Date.now() - state.lastStaticAttemptAt >= STATIC_RETRY_MS) {
+      await fetchStaticFallback();
+    }
   } finally {
     state.fullRefreshRunning = false;
     render();
@@ -353,7 +422,7 @@ async function refreshFullHistory() {
   state.fullRefreshRunning = true;
   try {
     const normalized = await fetchJson(LIVE_HISTORY_URL);
-    adoptPayload(normalized, "live");
+    adoptPayload(normalized, "history");
   } catch {
     await fetchStaticFallback();
   } finally {
@@ -396,9 +465,31 @@ function formatPoints(value) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, useGrouping: false }).format(value);
 }
 
-function formatUtc(value) {
+function formatCollectorTime(value) {
   const milliseconds = parseTimestamp(value);
-  return milliseconds === null ? "Unavailable" : `${utcDate.format(milliseconds).replace(",", "")} UTC`;
+  return milliseconds === null
+    ? "Unavailable"
+    : `${utcDate.format(milliseconds).replace(",", "")} · collector host clock`;
+}
+
+function formatMt5Reported(value) {
+  if (typeof value !== "string" || !value) return "Unavailable";
+  return `${value} · MT5-reported, time basis unverified`;
+}
+
+function formatSignedOffset(seconds) {
+  if (!isFiniteNumber(seconds)) return "Offset unavailable";
+  const sign = seconds >= 0 ? "+" : "−";
+  let remaining = Math.round(Math.abs(seconds));
+  const hours = Math.floor(remaining / 3600);
+  remaining -= hours * 3600;
+  const minutes = Math.floor(remaining / 60);
+  const tail = remaining - minutes * 60;
+  const parts = [];
+  if (hours) parts.push(`${hours}h`);
+  if (minutes || hours) parts.push(`${minutes}m`);
+  parts.push(`${tail}s`);
+  return `${sign}${parts.join(" ")} vs collector`;
 }
 
 function formatAge(milliseconds) {
@@ -430,11 +521,11 @@ function setTone(node, tone) {
 }
 
 function visibleSamples() {
-  const timed = state.samples.filter(sample => sample._tick_ms !== null);
+  const timed = state.samples.filter(sample => sample._collected_ms !== null);
   if (!timed.length) return [];
-  const anchor = timed.reduce((latest, sample) => Math.max(latest, sample._tick_ms), -Infinity);
+  const anchor = timed.reduce((latest, sample) => Math.max(latest, sample._collected_ms), -Infinity);
   const cutoff = anchor - state.rangeMs;
-  return timed.filter(sample => sample._tick_ms >= cutoff && sample._tick_ms <= anchor);
+  return timed.filter(sample => sample._collected_ms >= cutoff && sample._collected_ms <= anchor);
 }
 
 function renderLatestQuote() {
@@ -451,21 +542,30 @@ function renderLatestQuote() {
 function collectionView() {
   const collection = state.latest?.collection ?? null;
   const collectedMs = collection?._collected_ms ?? latestQuote()?._collected_ms ?? null;
-  const ageMs = collectedMs === null ? null : Math.max(0, Date.now() - collectedMs);
+  const backendAgeMs = isFiniteNumber(collection?.collection_age_seconds)
+    ? collection.collection_age_seconds * 1000
+    : null;
+  const sinceReceiptMs = state.latestReceiptMonotonicMs === null
+    ? null
+    : Math.max(0, window.performance.now() - state.latestReceiptMonotonicMs);
+  const ageMs = backendAgeMs === null
+    ? null
+    : backendAgeMs + (sinceReceiptMs ?? 0);
   const staleAfterMs = (collection?.source_stale_after_seconds ?? DEFAULT_STALE_SECONDS) * 1000;
   const status = collection?.status ?? "unavailable";
   const connected = collection?.connected;
   const fresh = ageMs !== null && ageMs <= staleAfterMs;
-  const healthy = fresh && status === "live" && connected !== false;
-  return { collection, collectedMs, ageMs, staleAfterMs, status, connected, fresh, healthy };
+  const healthy = fresh
+    && status === "live"
+    && connected !== false
+    && state.latestSource === "live"
+    && state.liveTransportOk === true;
+  return { collection, collectedMs, backendAgeMs, sinceReceiptMs, ageMs, staleAfterMs, status, connected, fresh, healthy };
 }
 
 function renderFreshness() {
   const view = collectionView();
   const quote = latestQuote();
-  const tickAgeMs = quote?._tick_ms === null || quote?._tick_ms === undefined
-    ? null
-    : Math.max(0, Date.now() - quote._tick_ms);
 
   const collectorState = el("collector-state");
   if (!view.collection || view.collectedMs === null) {
@@ -476,6 +576,9 @@ function renderFreshness() {
     setTone(collectorState, "positive");
   } else if (!view.fresh) {
     collectorState.textContent = "Stale";
+    setTone(collectorState, "warning");
+  } else if (view.status === "live" && !view.healthy) {
+    collectorState.textContent = "Last known live";
     setTone(collectorState, "warning");
   } else {
     const labels = {
@@ -488,20 +591,26 @@ function renderFreshness() {
     collectorState.textContent = labels[view.status] ?? "Unavailable";
     setTone(collectorState, view.status === "disconnected" || view.status === "unavailable" ? "negative" : "warning");
   }
+  const ageBasis = state.latestSource === "static"
+    ? "age at static snapshot plus time since load"
+    : "backend age plus time since response";
   el("collector-age").textContent = view.ageMs === null
-    ? "No collection time"
-    : `${formatAge(view.ageMs)} · ${formatUtc(view.collection.collected_at)}`;
+    ? "Backend collection age unavailable"
+    : `${formatAge(view.ageMs)} · ${ageBasis}`;
 
   const tickState = el("tick-state");
-  if (tickAgeMs === null) {
+  if (!quote?.tick_at) {
     tickState.textContent = "Unavailable";
     setTone(tickState, "negative");
-    el("tick-age").textContent = "No broker tick time";
+    el("tick-age").textContent = "No MT5-reported timestamp";
+  } else if (quote._mt5_reported_offset_material) {
+    tickState.textContent = "Clock offset detected";
+    setTone(tickState, "warning");
+    el("tick-age").textContent = formatSignedOffset(quote._mt5_reported_offset_seconds);
   } else {
-    const recent = tickAgeMs <= view.staleAfterMs;
-    tickState.textContent = recent ? "Recent tick" : "No new tick";
-    setTone(tickState, recent ? "positive" : "warning");
-    el("tick-age").textContent = `${formatAge(tickAgeMs)} · ${formatUtc(quote.tick_at)}`;
+    tickState.textContent = "MT5 timestamp retained";
+    setTone(tickState, null);
+    el("tick-age").textContent = formatSignedOffset(quote._mt5_reported_offset_seconds);
   }
 
   const transport = el("transport-state");
@@ -537,7 +646,7 @@ function renderFreshness() {
   }
 
   el("updated-at").textContent = view.collection?.collected_at
-    ? `Collected ${formatUtc(view.collection.collected_at)}`
+    ? `Collector reported ${formatCollectorTime(view.collection.collected_at)}`
     : "No quote received";
 
   const alert = el("alert");
@@ -555,7 +664,11 @@ function renderFreshness() {
   } else if (!view.healthy) {
     alert.hidden = false;
     alert.className = "alert alert-warn";
-    alert.innerHTML = "<strong>Collector data is not fresh.</strong><span>The broker tick age is reported separately and is not used to infer a disconnection.</span>";
+    alert.innerHTML = "<strong>Collector data is not fresh.</strong><span>Freshness uses the backend collection age plus elapsed time since this response; the MT5-reported timestamp is excluded.</span>";
+  } else if (quote?._mt5_reported_offset_material) {
+    alert.hidden = false;
+    alert.className = "alert alert-warn";
+    alert.innerHTML = "<strong>MT5 and collector clocks differ.</strong><span>The raw MT5 timestamp is preserved for audit, but its time basis is unverified and it is excluded from freshness, ranges and chart axes.</span>";
   } else {
     alert.hidden = true;
   }
@@ -563,18 +676,18 @@ function renderFreshness() {
 
 function renderStatistics(rows) {
   const mids = rows.map(row => row.mid).filter(isFiniteNumber);
-  const tickTimes = rows.map(row => row._tick_ms).filter(Number.isFinite);
+  const collectionTimes = rows.map(row => row._collected_ms).filter(Number.isFinite);
   el("visible-samples").textContent = String(rows.length);
-  if (tickTimes.length) {
-    const start = Math.min(...tickTimes);
-    const end = Math.max(...tickTimes);
-    el("coverage-note").textContent = `${formatUtc(new Date(start).toISOString())} → ${formatUtc(new Date(end).toISOString())}`;
+  if (collectionTimes.length) {
+    const start = Math.min(...collectionTimes);
+    const end = Math.max(...collectionTimes);
+    el("coverage-note").textContent = `${formatCollectorTime(new Date(start).toISOString())} → ${formatCollectorTime(new Date(end).toISOString())}`;
     el("range-span").textContent = formatDuration(end - start);
-    el("range-note").textContent = `Range ends at broker tick ${shortUtc.format(end)} UTC.`;
+    el("range-note").textContent = `Range ends at collector host-clock observation ${shortUtc.format(end)}.`;
   } else {
-    el("coverage-note").textContent = "No market-time coverage";
+    el("coverage-note").textContent = "No collector-time coverage";
     el("range-span").textContent = "Unavailable";
-    el("range-note").textContent = "Range follows broker tick time.";
+    el("range-note").textContent = "Range follows collector first-observation time.";
   }
 
   if (mids.length) {
@@ -630,7 +743,7 @@ function chartGeometry(rows, values, width, height, { includeZero = false } = {}
   const pad = { left: width < 480 ? 58 : 72, right: 16, top: 14, bottom: 35 };
   const plotWidth = Math.max(1, width - pad.left - pad.right);
   const plotHeight = Math.max(1, height - pad.top - pad.bottom);
-  const times = rows.map(row => row._tick_ms);
+  const times = rows.map(row => row._collected_ms);
   const start = Math.min(...times);
   const end = Math.max(...times);
   let minimum = includeZero ? Math.min(0, ...values) : Math.min(...values);
@@ -673,7 +786,7 @@ function drawAxes(context, geometry, rows, width, height, formatter) {
   const indexes = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
   for (const index of indexes) {
     context.textAlign = index === 0 ? "left" : index === rows.length - 1 ? "right" : "center";
-    context.fillText(shortUtc.format(rows[index]._tick_ms), geometry.x(index), height - 10);
+    context.fillText(shortUtc.format(rows[index]._collected_ms), geometry.x(index), height - 10);
   }
   context.textAlign = "left";
 }
@@ -717,7 +830,7 @@ function drawPriceChart(rows) {
   const prepared = prepareCanvas("quote-chart", chartRows.length > 0);
   const summary = el("quote-chart-summary");
   if (!chartRows.length) {
-    summary.textContent = "No verified FixedStep0.5 tick history is available for the selected market-time range.";
+    summary.textContent = "No verified FixedStep0.5 tick history is available for the selected collector-time range.";
     return;
   }
   const values = chartRows.flatMap(row => [row.bid, row.ask, row.mid].filter(isFiniteNumber));
@@ -747,7 +860,7 @@ function drawPriceChart(rows) {
   prepared.canvas._chart = { kind: "price", rows: chartRows, geometry };
 
   const mids = chartRows.map(row => row.mid).filter(isFiniteNumber);
-  summary.textContent = `${chartRows.length} distinct broker-tick observations from ${formatUtc(chartRows[0].tick_at)} to ${formatUtc(chartRows[chartRows.length - 1].tick_at)}. Mid price minimum ${formatPrice(Math.min(...mids))} and maximum ${formatPrice(Math.max(...mids))}.`;
+  summary.textContent = `${chartRows.length} distinct broker-tick observations first collected from ${formatCollectorTime(chartRows[0].collected_at)} to ${formatCollectorTime(chartRows[chartRows.length - 1].collected_at)}. Mid price minimum ${formatPrice(Math.min(...mids))} and maximum ${formatPrice(Math.max(...mids))}.`;
 }
 
 function drawSpreadChart(rows) {
@@ -757,7 +870,7 @@ function drawSpreadChart(rows) {
   const prepared = prepareCanvas("spread-chart", chartRows.length > 0);
   const summary = el("spread-chart-summary");
   if (!chartRows.length) {
-    summary.textContent = "No verified spread history is available for the selected market-time range.";
+    summary.textContent = "No verified spread history is available for the selected collector-time range.";
     return;
   }
   const values = chartRows.map(row => row[field]);
@@ -815,9 +928,10 @@ function showTooltip(canvas, event) {
     details = [["Spread", chart.spreadFormatter(row[chart.spreadField])]];
   }
   tooltip.innerHTML = [
-    `<strong>${escapeHtml(formatUtc(row.tick_at))}</strong>`,
+    `<strong>${escapeHtml(formatCollectorTime(row.collected_at))}</strong>`,
     ...details.map(([label, value]) => `<span class="tooltip-label">${escapeHtml(label)}:</span> ${escapeHtml(value)}`),
-    `<span class="tooltip-label">Collected:</span> ${escapeHtml(formatUtc(row.collected_at))}`,
+    `<span class="tooltip-label">First collected:</span> ${escapeHtml(formatCollectorTime(row.collected_at))}`,
+    `<span class="tooltip-label">MT5 reported:</span> ${escapeHtml(formatMt5Reported(row.tick_at))}`,
   ].join("<br>");
   tooltip.hidden = false;
   tooltip.style.left = `${Math.min(window.innerWidth - 304, event.clientX + 14)}px`;

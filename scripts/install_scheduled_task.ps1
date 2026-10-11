@@ -6,6 +6,7 @@ param(
     [string]$PythonExe,
     [string]$DatabasePath,
     [string]$SiteRoot,
+    [string]$ApiDataDir,
     [ValidateRange(15, 60)]
     [int]$IntervalSeconds = 15,
     [ValidateRange(600, 86400)]
@@ -37,6 +38,9 @@ if (-not $DatabasePath) {
 if (-not $SiteRoot) {
     $SiteRoot = Join-Path $resolvedProject 'docs'
 }
+if (-not $ApiDataDir) {
+    $ApiDataDir = Join-Path $resolvedProject 'runtime\quote-api'
+}
 $runner = Join-Path $resolvedProject 'scripts\run_monitor.ps1'
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
     throw 'The quote monitor runner script was not found.'
@@ -64,6 +68,7 @@ $arguments = @(
     '-PublishIntervalSeconds', $PublishIntervalSeconds,
     '-DatabasePath', (Quote-TaskArgument $DatabasePath),
     '-SiteRoot', (Quote-TaskArgument $SiteRoot),
+    '-ApiDataDir', (Quote-TaskArgument $ApiDataDir),
     '-PublicBaseUrl', (Quote-TaskArgument $PublicBaseUrl),
     '-Symbol', (Quote-TaskArgument $Symbol),
     '-ApiHost', (Quote-TaskArgument $ApiHost),
@@ -107,6 +112,8 @@ $registered = Get-ScheduledTask -TaskName $TaskName
     PublishEnabled = $EnableGitPublish.IsPresent
     PublishIntervalSeconds = $PublishIntervalSeconds
     DatabasePath = $DatabasePath
-    ApiEndpoint = "http://${ApiHost}:${ApiPort}/v1/quotes"
+    ApiDataDir = $ApiDataDir
+    ApiEndpoint = "http://${ApiHost}:${ApiPort}/v1/latest"
+    HistoryEndpoint = "http://${ApiHost}:${ApiPort}/v1/quotes"
     SiteRoot = $SiteRoot
 }
