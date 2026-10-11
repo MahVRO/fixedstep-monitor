@@ -13,6 +13,13 @@ This runbook operates the independent FixedStep0.5 quote monitor beside an alrea
 
 These are deliberately distinct from the legacy account monitor. Its task can remain disabled and its `runtime\stop-monitor` marker can remain in place; neither affects the quote runtime.
 
+The task uses the same interactive Windows user as the authenticated MT5
+terminal and DPAPI-protected relay credential. It starts at user logon and has
+an additional five-minute watchdog trigger. `IgnoreNew` leaves a healthy
+long-running instance untouched; after a crash, the next watchdog tick can
+start it again. A logged-on Windows session and an authenticated MT5 terminal
+remain prerequisites after reboot.
+
 ## Install and verify without publication
 
 ```powershell

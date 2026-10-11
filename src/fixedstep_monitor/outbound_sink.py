@@ -4,6 +4,7 @@ import json
 import math
 import os
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,8 +16,11 @@ from .timeutil import parse_utc
 
 
 TOKEN_ENVIRONMENT_VARIABLE = "FIXEDSTEP_REALTIME_TOKEN"
+INGEST_HOSTNAME = "fixedstep-quote-relay.fixedstep-quote-relay.workers.dev"
 MAX_REQUEST_BYTES = 16_384
 MAX_RESPONSE_BYTES = 4_096
+
+
 class OutboundPublishError(RuntimeError):
     """A deliberately sanitized outbound-publication failure."""
 
@@ -208,6 +212,29 @@ def build_outbound_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+def _with_elapsed_queue_age(
+    payload: dict[str, Any], elapsed_seconds: float
+) -> dict[str, Any]:
+    """Copy a snapshot and account for monotonic time spent awaiting publication."""
+
+    adjusted = dict(payload)
+    collection = payload.get("collection")
+    if not isinstance(collection, dict):
+        return adjusted
+    age = collection.get("collection_age_seconds")
+    if (
+        isinstance(age, (int, float))
+        and not isinstance(age, bool)
+        and math.isfinite(float(age))
+    ):
+        adjusted_collection = dict(collection)
+        adjusted_collection["collection_age_seconds"] = float(age) + max(
+            0.0, elapsed_seconds
+        )
+        adjusted["collection"] = adjusted_collection
+    return adjusted
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):  # noqa: ANN001
         return None
@@ -233,6 +260,8 @@ class OutboundQuotePublisher:
             or parsed.path != "/v1/ingest"
             or parsed.query
             or parsed.fragment
+            or parsed.port is not None
+            or parsed.hostname != INGEST_HOSTNAME
         ):
             raise OutboundPublishError("invalid_configuration:ingest_url")
         if (
@@ -325,11 +354,13 @@ class LatestWinsPublishWorker:
             [OutboundPublishResult | None, str | None], None
         ]
         | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._publish = publish
         self._on_complete = on_complete
+        self._monotonic = monotonic
         self._condition = threading.Condition()
-        self._pending: dict[str, Any] | None = None
+        self._pending: tuple[dict[str, Any], float] | None = None
         self._running = False
         self._stopping = False
         self._drain = True
@@ -354,7 +385,7 @@ class LatestWinsPublishWorker:
             queued = self._pending is None
             if not queued:
                 self._coalesced += 1
-            self._pending = payload
+            self._pending = (payload, self._monotonic())
             self._condition.notify()
             return queued
 
@@ -391,7 +422,7 @@ class LatestWinsPublishWorker:
                 )
                 if self._stopping and (not self._drain or self._pending is None):
                     return
-                payload = self._pending
+                pending = self._pending
                 self._pending = None
                 self._running = True
                 self._started += 1
@@ -399,8 +430,15 @@ class LatestWinsPublishWorker:
             result: OutboundPublishResult | None = None
             error: str | None = None
             try:
-                if payload is not None:
-                    result = self._publish(payload)
+                if pending is not None:
+                    payload, enqueued_at = pending
+                    elapsed_seconds = self._monotonic() - enqueued_at
+                    if not math.isfinite(elapsed_seconds) or elapsed_seconds < 0:
+                        elapsed_seconds = 0.0
+                    prepared = build_outbound_payload(
+                        _with_elapsed_queue_age(payload, elapsed_seconds)
+                    )
+                    result = self._publish(prepared)
             except OutboundPublishError as exc:
                 error = str(exc)
             except Exception as exc:

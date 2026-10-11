@@ -171,7 +171,7 @@ class OutboundPublisherTests(unittest.TestCase):
     def test_https_endpoint_is_exact_and_token_is_only_an_authorization_header(self) -> None:
         opener = _RecordingOpener()
         publisher = OutboundQuotePublisher(
-            "https://fixedstep-monitor.example.workers.dev/v1/ingest",
+            "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev/v1/ingest",
             TOKEN,
             timeout_seconds=3.5,
             opener=opener,
@@ -182,7 +182,10 @@ class OutboundPublisherTests(unittest.TestCase):
         self.assertEqual(result, OutboundPublishResult(SNAPSHOT_ID, 201))
         self.assertEqual(len(opener.calls), 1)
         request, timeout = opener.calls[0]
-        self.assertEqual(request.full_url, "https://fixedstep-monitor.example.workers.dev/v1/ingest")
+        self.assertEqual(
+            request.full_url,
+            "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev/v1/ingest",
+        )
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(timeout, 3.5)
         self.assertEqual(request.get_header("Authorization"), f"Bearer {TOKEN}")
@@ -201,6 +204,8 @@ class OutboundPublisherTests(unittest.TestCase):
             "https://example.workers.dev/v1/ingest/",
             "https://example.workers.dev/v1/ingest?token=bad",
             "https://example.workers.dev/v1/ingest#fragment",
+            "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev:444/v1/ingest",
+            "https://different-worker.example.workers.dev/v1/ingest",
         )
         for url in invalid_urls:
             with self.subTest(url=url):
@@ -216,14 +221,15 @@ class OutboundPublisherTests(unittest.TestCase):
                     OutboundPublishError, "invalid_configuration:token"
                 ):
                     OutboundQuotePublisher(
-                        "https://example.workers.dev/v1/ingest", invalid
+                        "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev/v1/ingest",
+                        invalid,
                     )
 
         with patch.dict(
             os.environ, {TOKEN_ENVIRONMENT_VARIABLE: TOKEN}, clear=False
         ):
             OutboundQuotePublisher.from_environment(
-                "https://example.workers.dev/v1/ingest"
+                "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev/v1/ingest"
             )
             self.assertNotIn(TOKEN_ENVIRONMENT_VARIABLE, os.environ)
 
@@ -232,7 +238,9 @@ class OutboundPublisherTests(unittest.TestCase):
             failure=RuntimeError(f"socket failed while using {TOKEN}")
         )
         publisher = OutboundQuotePublisher(
-            "https://example.workers.dev/v1/ingest", TOKEN, opener=opener
+            "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev/v1/ingest",
+            TOKEN,
+            opener=opener,
         )
 
         with self.assertRaises(OutboundPublishError) as raised:
@@ -254,7 +262,9 @@ class OutboundPublisherTests(unittest.TestCase):
                 return WrongAcknowledgement()
 
         publisher = OutboundQuotePublisher(
-            "https://example.workers.dev/v1/ingest", TOKEN, opener=WrongOpener()
+            "https://fixedstep-quote-relay.fixedstep-quote-relay.workers.dev/v1/ingest",
+            TOKEN,
+            opener=WrongOpener(),
         )
         with self.assertRaisesRegex(
             OutboundPublishError, "remote_rejected:invalid_acknowledgement"
@@ -263,6 +273,45 @@ class OutboundPublisherTests(unittest.TestCase):
 
 
 class LatestWinsPublishWorkerTests(unittest.TestCase):
+    def test_stale_payload_waiting_in_queue_is_not_published(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        published: list[str] = []
+        now = [100.0]
+
+        def monotonic() -> float:
+            return now[0]
+
+        def publish(payload: dict[str, Any]) -> OutboundPublishResult:
+            published.append(payload["snapshot_id"])
+            if len(published) == 1:
+                started.set()
+                self.assertTrue(release.wait(2), "test publication was not released")
+            return OutboundPublishResult(payload["snapshot_id"], 202)
+
+        worker = LatestWinsPublishWorker(publish, monotonic=monotonic)
+        first = quote_payload(snapshot_id="46e234b4-ddae-4775-958a-d3bac5f8600e")
+        delayed = quote_payload(snapshot_id="b94435f7-292f-45fb-9468-d5d745139a28")
+        try:
+            self.assertTrue(worker.request(first))
+            self.assertTrue(started.wait(1), "worker did not start")
+            self.assertTrue(worker.request(delayed))
+            now[0] += 46.0
+            release.set()
+            self.assertTrue(worker.shutdown(drain=True, timeout=3))
+        finally:
+            release.set()
+            worker.shutdown(drain=False, timeout=1)
+
+        self.assertEqual(published, [first["snapshot_id"]])
+        state = worker.snapshot
+        self.assertEqual(state.completed, 2)
+        self.assertEqual(state.failures, 1)
+        self.assertEqual(
+            state.last_error,
+            "invalid_payload:collection.collection_age_seconds",
+        )
+
     def test_slow_publication_keeps_only_the_latest_pending_snapshot(self) -> None:
         started = threading.Event()
         release = threading.Event()

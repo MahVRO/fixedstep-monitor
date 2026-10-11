@@ -152,7 +152,7 @@ if ($RealtimeIngestUrl) {
     }
 }
 
-Write-MonitorLog 'INFO' "quote_monitor_started collection_interval=$IntervalSeconds publish_enabled=$($EnableGitPublish.IsPresent)"
+Write-MonitorLog 'INFO' "quote_monitor_started collection_interval=$IntervalSeconds publish_enabled=$($EnableGitPublish.IsPresent) realtime_publish_configured=$([bool]$RealtimeIngestUrl) realtime_credential_verified=$([bool]$realtimeToken)"
 $priorGitTimeout = $env:FIXEDSTEP_MONITOR_GIT_TIMEOUT_SECONDS
 $priorRealtimeToken = $env:FIXEDSTEP_REALTIME_TOKEN
 $priorErrorActionPreference = $ErrorActionPreference

@@ -1,7 +1,7 @@
 {
   "schema_version": "fixedstep-quotes-v1",
-  "snapshot_id": "2e0117d0-4607-42bc-baa1-0f14995b601d",
-  "generated_at": "2026-10-11T14:03:07.515Z",
+  "snapshot_id": "de6d0cdb-5470-4d4d-bf26-e4ebdb54668e",
+  "generated_at": "2026-10-11T14:21:16.936Z",
   "timezone": "UTC",
   "collector_clock_basis": "utc_serialized_host_clock_synchronization_not_asserted",
   "timezone_applies_to": [
@@ -19,22 +19,22 @@
     "expected_collection_interval_seconds": 10,
     "expected_publish_interval_seconds": 600,
     "source_stale_after_seconds": 45,
-    "collected_at": "2026-10-11T14:03:05.925Z",
-    "collection_age_seconds": 1.590441
+    "collected_at": "2026-10-11T14:21:16.808Z",
+    "collection_age_seconds": 0.128844
   },
   "coverage": {
-    "quote_samples": 547,
-    "stored_quote_samples": 547,
+    "quote_samples": 561,
+    "stored_quote_samples": 561,
     "maximum_public_samples": 18000,
     "maximum_public_json_bytes": 3500000,
     "sampling_policy": "10-second source samples for the latest 24 hours; last observed sample per collector first-observation host-clock minute through day 7; last observed sample per collector first-observation host-clock hour through day 90; older samples are not published; raw MT5 time does not control retention; no interpolation",
     "chart_time_basis": "collector_first_observation_host_clock",
-    "history_generated_at": "2026-10-11T14:03:07.515Z",
-    "history_snapshot_id": "2e0117d0-4607-42bc-baa1-0f14995b601d",
+    "history_generated_at": "2026-10-11T14:21:16.936Z",
+    "history_snapshot_id": "de6d0cdb-5470-4d4d-bf26-e4ebdb54668e",
     "collection_start_at": "2026-10-11T10:54:53.830Z",
-    "collection_end_at": "2026-10-11T14:03:07.436Z",
+    "collection_end_at": "2026-10-11T14:21:16.877Z",
     "mt5_reported_start_at": "2026-10-11T13:56:10.365Z",
-    "mt5_reported_end_at": "2026-10-11T17:04:24.366Z"
+    "mt5_reported_end_at": "2026-10-11T17:21:16.365Z"
   },
   "page": "https://mahvro.github.io/fixedstep-monitor/ai/",
   "datasets": [
@@ -59,14 +59,14 @@
         "timezone",
         "timezone_applies_to"
       ],
-      "size_bytes": 2508,
-      "sha256": "f6f4c34d9a089959a4616155486796336a148bafb0e561f508bf75bbf00a40e1"
+      "size_bytes": 2509,
+      "sha256": "1153a64c48422eb180927dcf175b669bf1ed79e0d11d42652bc5af58a93a5e67"
     },
     {
       "title": "Quote history",
       "format": "json",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/quotes.json",
-      "row_count": 547,
+      "row_count": 561,
       "available_fields": [
         "collected_at",
         "tick_at",
@@ -77,14 +77,14 @@
         "spread",
         "spread_points"
       ],
-      "size_bytes": 93309,
-      "sha256": "1a77c099cc030333fb9de12bacd627fe366fa371be4b0d09e69134ad80d7a081"
+      "size_bytes": 95634,
+      "sha256": "2af0731edf7a80cf03f0ba32b7d8ac295a78070addbd9a9d4038ecb22c9a69c0"
     },
     {
       "title": "Quote history",
       "format": "csv",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/data/quotes.csv",
-      "row_count": 547,
+      "row_count": 561,
       "available_fields": [
         "collected_at",
         "tick_at",
@@ -95,8 +95,8 @@
         "spread",
         "spread_points"
       ],
-      "size_bytes": 44366,
-      "sha256": "63a3ca193d0ec92538d914d108976ce0dfc4361b6e5aee01400044b4c27a14e0"
+      "size_bytes": 45500,
+      "sha256": "cfd21bf65d4a151df859f5645d4a09dc3a4cfc887b88dcbe09a686989061cd8e"
     }
   ],
   "charts": [
@@ -104,15 +104,15 @@
       "title": "FixedStep0.5 bid, mid and ask",
       "format": "svg",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/charts/fixedstep-price.svg",
-      "size_bytes": 25654,
-      "sha256": "a9d5c3fb0d1ec4dfb6b5477f4914298b5777b0ce298ceeca75d0b0f4e5bd1c93"
+      "size_bytes": 26101,
+      "sha256": "42f822739e63496aec9e0e73110efadbc7ec970929be2a62edd366f723ffe062"
     },
     {
       "title": "FixedStep0.5 spread",
       "format": "svg",
       "url": "https://mahvro.github.io/fixedstep-monitor/ai/charts/fixedstep-spread.svg",
-      "size_bytes": 9771,
-      "sha256": "22edbb4daea76aba4bb227308cac41e957937646b782867d0010da4cb9641128"
+      "size_bytes": 9920,
+      "sha256": "5a8e6f6e374bcb505695cf59ce9e658f40e92a0842cee6a9e3970ec12c249bf1"
     }
   ]
 }

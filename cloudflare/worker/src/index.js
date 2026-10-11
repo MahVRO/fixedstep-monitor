@@ -242,6 +242,7 @@ function responseHeaders(request, contentType = "application/json; charset=utf-8
     "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
+    "Strict-Transport-Security": "max-age=31536000",
     Vary: "Origin",
   });
   if (request.headers.get("Origin") === ALLOWED_ORIGIN) {
@@ -643,6 +644,8 @@ export function createWorker({ now = () => Date.now() } = {}) {
       } catch {
         return errorResponse(request, 400, "invalid_url");
       }
+
+      if (url.protocol !== "https:") return errorResponse(request, 400, "https_required");
 
       if (request.method === "OPTIONS") return handleOptions(request, url);
       if (request.method === "POST" && url.pathname === "/v1/ingest" && url.search === "") {

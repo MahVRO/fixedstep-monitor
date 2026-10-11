@@ -1,5 +1,7 @@
 "use strict";
 
+import { isHealthyLive, shouldAdoptLatest } from "./live-policy.js";
+
 const SYMBOL = "FixedStep0.5";
 const SCHEMA_VERSION = "fixedstep-quotes-v1";
 
@@ -365,17 +367,18 @@ function adoptPayload(normalized, source) {
   const currentGenerated = state.latest?._generated_ms ?? -Infinity;
   const incomingRelayReceived = normalized.relay?._received_ms ?? -Infinity;
   const currentRelayReceived = state.latest?.relay?._received_ms ?? -Infinity;
-  const liveCanReplace = source === "live" && normalized.relay !== null && (
-    state.latestSource !== "live"
-    || incomingRelayReceived > currentRelayReceived
-    || (incomingRelayReceived === currentRelayReceived && incomingGenerated >= currentGenerated)
-  );
-  const nonLiveCanReplace = source !== "live" && source !== "history" && (
-    !state.latest
-    || incomingCollected > currentCollected
-    || (incomingCollected === currentCollected && incomingGenerated > currentGenerated)
-  );
-  const shouldAdopt = !state.latest || liveCanReplace || nonLiveCanReplace;
+  const shouldAdopt = shouldAdoptLatest({
+    source,
+    hasLatest: state.latest !== null,
+    hasRelay: normalized.relay !== null,
+    currentSource: state.latestSource,
+    incomingRelayReceived,
+    currentRelayReceived,
+    incomingGenerated,
+    currentGenerated,
+    incomingCollected,
+    currentCollected,
+  });
 
   if (shouldAdopt) {
     state.latest = { ...normalized, quote: incomingQuote };
@@ -433,6 +436,7 @@ async function bootstrap() {
   if (LIVE_LATEST_URL) {
     try {
       const normalized = await fetchJson(LIVE_LATEST_URL);
+      if (normalized.relay === null) throw new Error("live relay metadata is required");
       state.liveTransportOk = true;
       state.transportError = false;
       adoptPayload(normalized, "live");
@@ -454,6 +458,7 @@ async function pollLatest() {
   state.latestPollRunning = true;
   try {
     const normalized = await fetchJson(LIVE_LATEST_URL);
+    if (normalized.relay === null) throw new Error("live relay metadata is required");
     state.liveTransportOk = true;
     state.transportError = false;
     adoptPayload(normalized, "live");
@@ -616,11 +621,14 @@ function collectionView() {
   const status = collection?.status ?? "unavailable";
   const connected = collection?.connected;
   const fresh = ageMs !== null && ageMs <= staleAfterMs;
-  const healthy = fresh
-    && status === "live"
-    && connected !== false
-    && state.latestSource === "live"
-    && state.liveTransportOk === true;
+  const healthy = isHealthyLive({
+    fresh,
+    status,
+    connected,
+    latestSource: state.latestSource,
+    liveTransportOk: state.liveTransportOk,
+    hasRelay: state.latest?.relay !== null && state.latest?.relay !== undefined,
+  });
   return { collection, collectedMs, backendAgeMs, sinceReceiptMs, ageMs, staleAfterMs, status, connected, fresh, healthy };
 }
 

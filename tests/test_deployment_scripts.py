@@ -54,6 +54,10 @@ class DeploymentScriptTests(unittest.TestCase):
         self.assertIn("Realtime publication requires IntervalSeconds 10.", installer)
         self.assertIn("[Uri]::TryCreate", installer)
         self.assertIn("$realtimeUri.AbsolutePath -ne '/v1/ingest'", installer)
+        self.assertIn("fixedstep-quote-relay.fixedstep-quote-relay.workers.dev", installer)
+        self.assertIn("valid token decryptable by the current Windows user", installer)
+        self.assertIn("ConvertTo-SecureString -String $protectedToken", installer)
+        self.assertIn("ZeroFreeBSTR", installer)
         self.assertIn("'-RealtimeTokenPath'", installer)
         self.assertNotIn("'-RealtimeToken'", installer)
         self.assertNotIn("FIXEDSTEP_REALTIME_TOKEN", installer)
@@ -74,6 +78,18 @@ class DeploymentScriptTests(unittest.TestCase):
         self.assertIn("32-256 visible ASCII characters", saver)
         self.assertIn("SetAccessRuleProtection($true, $false)", saver)
         self.assertIn("SecurityIdentifier('S-1-5-18')", saver)
+
+    def test_task_has_logon_start_and_a_five_minute_watchdog(self):
+        root = Path(__file__).resolve().parents[1]
+        installer = (root / "scripts" / "install_scheduled_task.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("New-ScheduledTaskTrigger -AtLogOn", installer)
+        self.assertIn("$watchdogTrigger = New-ScheduledTaskTrigger", installer)
+        self.assertIn("-RepetitionInterval (New-TimeSpan -Minutes 5)", installer)
+        self.assertIn("-Trigger @($logonTrigger, $watchdogTrigger)", installer)
+        self.assertIn("-MultipleInstances IgnoreNew", installer)
 
     def test_runner_passes_a_bounded_git_timeout_through_the_environment(self):
         root = Path(__file__).resolve().parents[1]

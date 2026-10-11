@@ -73,8 +73,32 @@ if ($RealtimeIngestUrl) {
         $realtimeUri.UserInfo -or
         $realtimeUri.AbsolutePath -ne '/v1/ingest' -or
         $realtimeUri.Query -or
-        $realtimeUri.Fragment) {
-        throw 'Realtime publication requires an exact HTTPS /v1/ingest URL without credentials, query, or fragment.'
+        $realtimeUri.Fragment -or
+        -not $realtimeUri.IsDefaultPort -or
+        $realtimeUri.Host -ne 'fixedstep-quote-relay.fixedstep-quote-relay.workers.dev') {
+        throw 'Realtime publication requires the pinned Cloudflare HTTPS /v1/ingest endpoint.'
+    }
+    $validationBstr = [IntPtr]::Zero
+    $plainToken = $null
+    try {
+        $protectedToken = Get-Content -LiteralPath $RealtimeTokenPath -Raw -ErrorAction Stop
+        $secureToken = ConvertTo-SecureString -String $protectedToken -ErrorAction Stop
+        $validationBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+        $plainToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($validationBstr)
+        if ($plainToken.Length -lt 32 -or
+            $plainToken.Length -gt 256 -or
+            $plainToken -notmatch '^[\x21-\x7E]+$') {
+            throw 'invalid token'
+        }
+    }
+    catch {
+        throw 'Realtime publication requires a valid token decryptable by the current Windows user.'
+    }
+    finally {
+        if ($validationBstr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($validationBstr)
+        }
+        $plainToken = $null
     }
 }
 
@@ -117,7 +141,11 @@ $action = New-ScheduledTaskAction `
     -Execute (Get-Command powershell.exe).Source `
     -Argument ($arguments -join ' ') `
     -WorkingDirectory $resolvedProject
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$watchdogTrigger = New-ScheduledTaskTrigger `
+    -Once `
+    -At ((Get-Date).AddMinutes(5)) `
+    -RepetitionInterval (New-TimeSpan -Minutes 5)
 $principal = New-ScheduledTaskPrincipal `
     -UserId $env:USERNAME `
     -LogonType Interactive `
@@ -129,7 +157,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Days 3650)
 
-$task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
+$task = New-ScheduledTask -Action $action -Trigger @($logonTrigger, $watchdogTrigger) -Principal $principal -Settings $settings `
     -Description 'Quote-only FixedStep0.5 MT5 sampling, loopback API, and sanitized static fallback. Contains no account or trade action.'
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 
@@ -142,6 +170,8 @@ $registered = Get-ScheduledTask -TaskName $TaskName
     PublishEnabled = $EnableGitPublish.IsPresent
     PublishIntervalSeconds = $PublishIntervalSeconds
     RealtimePublishEnabled = [bool]$RealtimeIngestUrl
+    RealtimeCredentialVerified = [bool]$RealtimeIngestUrl
+    WatchdogIntervalMinutes = 5
     DatabasePath = $DatabasePath
     ApiDataDir = $ApiDataDir
     ApiEndpoint = "http://${ApiHost}:${ApiPort}/v1/latest"

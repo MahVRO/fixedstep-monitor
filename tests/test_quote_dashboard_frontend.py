@@ -13,6 +13,7 @@ class QuoteDashboardFrontendTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.html = (DASHBOARD / "index.html").read_text(encoding="utf-8")
         cls.javascript = (DASHBOARD / "app.js").read_text(encoding="utf-8")
+        cls.live_policy = (DASHBOARD / "live-policy.js").read_text(encoding="utf-8")
         cls.runtime_config = (DASHBOARD / "runtime-config.js").read_text(encoding="utf-8")
         cls.styles = (DASHBOARD / "app.css").read_text(encoding="utf-8")
 
@@ -49,10 +50,13 @@ class QuoteDashboardFrontendTests(unittest.TestCase):
         self.assertIn('fetchJson(STATIC_HISTORY_URL, { cacheBust: true })', self.javascript)
         self.assertIn('const requestUrl = cacheBust', self.javascript)
         self.assertNotIn('fetch(`${url}${separator}v=', self.javascript)
-        self.assertIn("incomingCollected > currentCollected", self.javascript)
-        self.assertIn("incomingRelayReceived > currentRelayReceived", self.javascript)
+        self.assertIn("incomingCollected > currentCollected", self.live_policy)
+        self.assertIn("incomingRelayReceived > currentRelayReceived", self.live_policy)
         self.assertIn('validatedTimestamp(payload.relay.received_at, "relay.received_at")', self.javascript)
-        self.assertIn('source === "live" && normalized.relay !== null', self.javascript)
+        self.assertIn('import { isHealthyLive, shouldAdoptLatest } from "./live-policy.js";', self.javascript)
+        self.assertIn('if (normalized.relay === null) throw new Error("live relay metadata is required")', self.javascript)
+        self.assertIn("hasRelay: normalized.relay !== null", self.javascript)
+        self.assertIn('src="app.js" type="module"', self.html)
         self.assertIn("await fetchStaticFallback();", self.javascript)
         self.assertLess(
             self.javascript.index("await fetchStaticFallback();", self.javascript.index("async function bootstrap")),
@@ -82,6 +86,7 @@ class QuoteDashboardFrontendTests(unittest.TestCase):
         self.assertIn("const receivedMonotonicMs = window.performance.now();", self.javascript)
         self.assertIn("normalized._received_monotonic_ms", self.javascript)
         self.assertIn("window.performance.now() - state.latestReceiptMonotonicMs", self.javascript)
+        self.assertIn("hasRelay: state.latest?.relay !== null", self.javascript)
         self.assertIn("mt5_reported_unverified", self.javascript)
         self.assertIn("utc_serialized_host_clock_synchronization_not_asserted", self.javascript)
         self.assertIn("Clock offset detected", self.javascript)

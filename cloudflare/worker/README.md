@@ -84,10 +84,16 @@ Prerequisites are a Cloudflare account with Workers/D1 enabled and a local
 Wrangler login. No Cloudflare credential or ingest token belongs in Git.
 
 1. From this directory, run `npx wrangler login`.
-2. Create D1 with `npx wrangler d1 create fixedstep-quotes`.
-3. Copy the returned IDs into the two explicit placeholders in `wrangler.toml`.
-4. Apply the schema with
-   `npx wrangler d1 migrations apply fixedstep-quotes --remote`.
+2. If reprovisioning, create two distinct databases with
+   `npx wrangler d1 create fixedstep-quotes` and
+   `npx wrangler d1 create fixedstep-quotes-preview`.
+3. Put the production ID in `database_id` and the different preview ID in
+   `preview_database_id`. The checked-in values identify the already-provisioned
+   production and preview databases; replace both only when intentionally
+   reprovisioning.
+4. Apply the schema to production with
+   `npx wrangler d1 migrations apply QUOTES_DB --remote`, then to preview with
+   `npx wrangler d1 migrations apply QUOTES_DB --remote --preview`.
 5. Generate a random token of 32-256 visible ASCII characters and store it only through
    `npx wrangler secret put INGEST_TOKEN`.
 6. Deploy with `npx wrangler deploy`.
@@ -95,9 +101,8 @@ Wrangler login. No Cloudflare credential or ingest token belongs in Git.
    it in the repository, a command-line argument, a scheduled-task definition,
    a URL, or logs.
 
-Before deploying, replace both `REPLACE_WITH_...` values. Their presence makes
-an incomplete deployment fail visibly instead of targeting an unintended D1
-database.
+Never reuse the production ID as the preview ID: remote development must not
+write to or prune production quote history.
 
 ## Local checks
 

@@ -402,8 +402,12 @@ test("reads hide expired observations even when no later ingest runs pruning", a
 
 test("unknown routes and unsafe methods remain closed", async () => {
   const env = environment();
+  const plaintext = await worker.fetch(new Request("http://relay.example/v1/latest"), env);
+  assert.equal(plaintext.status, 400);
+  assert.equal((await plaintext.json()).error, "https_required");
   assert.equal((await worker.fetch(new Request("https://relay.example/nope"), env)).status, 404);
   const deletion = await worker.fetch(new Request("https://relay.example/v1/latest", { method: "DELETE" }), env);
   assert.equal(deletion.status, 405);
   assert.equal(deletion.headers.get("Allow"), "GET, HEAD, OPTIONS");
+  assert.equal(deletion.headers.get("Strict-Transport-Security"), "max-age=31536000");
 });
