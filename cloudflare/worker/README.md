@@ -83,20 +83,20 @@ raw MT5 clocks is not asserted.
 Prerequisites are a Cloudflare account with Workers/D1 enabled and a local
 Wrangler login. No Cloudflare credential or ingest token belongs in Git.
 
-1. From this directory, run `npx wrangler login`.
+1. From this directory, run `npm ci`, then `npm exec -- wrangler login`.
 2. If reprovisioning, create two distinct databases with
-   `npx wrangler d1 create fixedstep-quotes` and
-   `npx wrangler d1 create fixedstep-quotes-preview`.
+   `npm exec -- wrangler d1 create fixedstep-quotes` and
+   `npm exec -- wrangler d1 create fixedstep-quotes-preview`.
 3. Put the production ID in `database_id` and the different preview ID in
    `preview_database_id`. The checked-in values identify the already-provisioned
    production and preview databases; replace both only when intentionally
    reprovisioning.
 4. Apply the schema to production with
-   `npx wrangler d1 migrations apply QUOTES_DB --remote`, then to preview with
-   `npx wrangler d1 migrations apply QUOTES_DB --remote --preview`.
+   `npm exec -- wrangler d1 migrations apply QUOTES_DB --remote`, then to preview with
+   `npm exec -- wrangler d1 migrations apply QUOTES_DB --remote --preview`.
 5. Generate a random token of 32-256 visible ASCII characters and store it only through
-   `npx wrangler secret put INGEST_TOKEN`.
-6. Deploy with `npx wrangler deploy`.
+   `npm exec -- wrangler secret put INGEST_TOKEN`.
+6. Deploy the pinned toolchain with `npm run deploy`.
 7. Put the same token in the MINIPC's protected local secret store; never place
    it in the repository, a command-line argument, a scheduled-task definition,
    a URL, or logs.
