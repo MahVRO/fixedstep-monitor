@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "deploy": "wrangler deploy",
     "test": "node --test"
+  },
+  "devDependencies": {
+    "wrangler": "4.149.0"
   },
   "engines": {
     "node": ">=20"

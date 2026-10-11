@@ -152,7 +152,12 @@ def build_outbound_payload(payload: dict[str, Any]) -> dict[str, Any]:
             raise OutboundPublishError("invalid_payload:quote.bid")
         if last is not None and last <= 0:
             raise OutboundPublishError("invalid_payload:quote.last")
-        if mid is None or not math.isclose(mid, (bid + ask) / 2, rel_tol=1e-10, abs_tol=1e-9):
+        midpoint = bid + (ask - bid) / 2
+        if (
+            not math.isfinite(midpoint)
+            or mid is None
+            or not math.isclose(mid, midpoint, rel_tol=1e-10, abs_tol=1e-9)
+        ):
             raise OutboundPublishError("invalid_payload:quote.mid")
         if spread is not None and spread < 0:
             raise OutboundPublishError("invalid_payload:quote.spread")
@@ -251,17 +256,24 @@ class OutboundQuotePublisher:
         timeout_seconds: float = 5.0,
         opener: Any | None = None,
     ) -> None:
-        parsed = urllib.parse.urlsplit(ingest_url)
+        try:
+            parsed = urllib.parse.urlsplit(ingest_url)
+            parsed_hostname = parsed.hostname
+            parsed_port = parsed.port
+            parsed_username = parsed.username
+            parsed_password = parsed.password
+        except (TypeError, UnicodeError, ValueError):
+            raise OutboundPublishError("invalid_configuration:ingest_url") from None
         if (
             parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
+            or not parsed_hostname
+            or parsed_username is not None
+            or parsed_password is not None
             or parsed.path != "/v1/ingest"
             or parsed.query
             or parsed.fragment
-            or parsed.port is not None
-            or parsed.hostname != INGEST_HOSTNAME
+            or parsed_port is not None
+            or parsed_hostname != INGEST_HOSTNAME
         ):
             raise OutboundPublishError("invalid_configuration:ingest_url")
         if (
